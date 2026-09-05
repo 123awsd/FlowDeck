@@ -1,0 +1,16 @@
+{
+  "name": "codex-remote-status-monitor",
+  "displayName": "Codex Remote Status Monitor",
+  "description": "Read-only Codex session status provider for remote VS Code workspaces.",
+  "version": "0.1.1",
+  "publisher": "local",
+  "engines": { "vscode": "^1.90.0" },
+  "extensionKind": ["workspace"],
+  "main": "./extension.js",
+  "activationEvents": ["*"],
+  "contributes": {
+    "commands": [
+      { "command": "codexRemoteStatus.get", "title": "Codex Remote Status: Get" }
+    ]
+  }
+}

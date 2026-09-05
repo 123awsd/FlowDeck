@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Codex 任务总控台
+Comment=集中查看和切换多个 VS Code Codex 任务
+Exec=/home/uav/桌面/codex管理/launch.sh
+Icon=/home/uav/桌面/codex管理/assets/codex-control-tower.svg
+Terminal=false
+Categories=Development;
+StartupNotify=true
+StartupWMClass=Codex 任务总控台

@@ -1,0 +1,17 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Local runtime state (may contain project paths and personal todos)
+tasks.json
+daily_todos.json
+seen_sessions.json
+events.jsonl
+
+# Generated extension packages and accidental window dumps
+*.vsix
+0x[0-9A-Fa-f]*
+
+# Logs and temporary files
+*.log
+*.tmp

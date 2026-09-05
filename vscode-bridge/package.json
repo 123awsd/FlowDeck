@@ -1,0 +1,13 @@
+{
+  "name": "codex-window-bridge",
+  "displayName": "Codex Window Bridge",
+  "description": "Receives local account-switch requests from Codex Control Tower.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "engines": { "vscode": "^1.90.0" },
+  "extensionKind": ["ui"],
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {},
+  "scripts": {}
+}
