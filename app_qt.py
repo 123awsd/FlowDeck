@@ -1,11 +1,13 @@
 """Qt UI: crisp Chinese text, VS Code discovery and task management."""
 import hashlib, json, sqlite3, subprocess, sys, uuid
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 from learning_feed import Store as LearningStore, build_feed as build_learning_feed_v2, context_profile
+from system_monitor import SystemMonitor
 try:
     from PySide6.QtCore import Qt, QTimer
     from PySide6.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPen
@@ -31,6 +33,27 @@ _LAST_BRIDGE_CLEANUP=0
 
 def global_point(event):
     return event.globalPosition().toPoint() if hasattr(event,"globalPosition") else event.globalPos()
+
+def format_bytes(value):
+    value=float(value or 0)
+    for unit in ("B","KB","MB","GB","TB"):
+        if abs(value)<1024 or unit=="TB":return f"{value:.1f} {unit}"
+        value/=1024
+
+def format_rate(value):return f"{format_bytes(value)}/s"
+
+class Sparkline(QWidget):
+    def __init__(self,color="#4f46e5",parent=None):
+        super().__init__(parent); self.values=[]; self.color=QColor(color); self.setMinimumHeight(34)
+    def set_values(self,values):self.values=list(values)[-60:]; self.update()
+    def paintEvent(self,event):
+        painter=QPainter(self); painter.setRenderHint(QPainter.Antialiasing); rect=self.rect().adjusted(1,5,-1,-4)
+        if len(self.values)<2:return
+        low,high=min(self.values),max(self.values); span=high-low or 1.0; points=[]
+        for index,value in enumerate(self.values):
+            x=rect.left()+rect.width()*index/max(1,len(self.values)-1); y=rect.bottom()-rect.height()*(value-low)/span; points.append((int(x),int(y)))
+        painter.setPen(QPen(QColor(self.color),2));
+        for first,second in zip(points,points[1:]):painter.drawLine(first[0],first[1],second[0],second[1])
 
 def extension_state(db):
     try:
@@ -285,7 +308,7 @@ class DraggableHeader(QFrame):
 
 class App(QWidget):
     def __init__(self):
-        super().__init__(); self.tasks=self.load(); self.todos=self.load_todos(); self.view_mode="monitor"; self.windows=[]; self.expanded=False; self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}; self.feed_error=""; self.feed_future=None; self.feed_executor=ThreadPoolExecutor(max_workers=1); self.feed_store=LearningStore(); self.feed_items=self.feed_store.recent(12); self.feed_stats=self.feed_store.stats(); self.learning_context={"label":"机器人前沿","terms":[]}
+        super().__init__(); self.tasks=self.load(); self.todos=self.load_todos(); self.view_mode="monitor"; self.windows=[]; self.expanded=False; self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}; self.feed_error=""; self.feed_future=None; self.feed_executor=ThreadPoolExecutor(max_workers=1); self.feed_store=LearningStore(); self.feed_items=self.feed_store.recent(12); self.feed_stats=self.feed_store.stats(); self.learning_context={"label":"机器人前沿","terms":[]}; self.system_monitor=SystemMonitor(); self.system_executor=ThreadPoolExecutor(max_workers=1); self.system_future=None; self.system_metrics=self.system_monitor.empty(); self.system_history={"cpu":deque(maxlen=60),"memory":deque(maxlen=60),"gpu":deque(maxlen=60),"disk":deque(maxlen=60)}
         try:self.seen=json.loads(SEEN_FILE.read_text())
         except Exception:self.seen={}
         self.setWindowTitle("Codex 任务总控台"); self.setWindowIcon(QIcon(str(BASE/"assets/codex-control-tower.svg"))); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setAttribute(Qt.WA_TranslucentBackground,True); self.setObjectName("root")
@@ -293,8 +316,8 @@ class App(QWidget):
         self.root=QVBoxLayout(self); self.root.setContentsMargins(0,0,0,0); self.root.setSpacing(4); self.bubble=BubbleButton(); self.bubble.setFixedSize(58,58); self.bubble.setToolTip("点击展开，拖动可移动"); shadow=QGraphicsDropShadowEffect(self); shadow.setBlurRadius(18); shadow.setOffset(0,4); shadow.setColor(QColor(15,23,42,120)); self.bubble.setGraphicsEffect(shadow); self.bubble.clicked.connect(self.toggle); self.root.addWidget(self.bubble)
         self.shell=QFrame(); self.shell.setObjectName("shell"); self.shell.setStyleSheet("QFrame#shell{background:#f8fafc;border:1px solid #dbe3ed;border-radius:12px}"); shell_layout=QVBoxLayout(self.shell); shell_layout.setContentsMargins(0,0,0,0); shell_layout.setSpacing(0)
         self.header=DraggableHeader(); self.header.setStyleSheet("background:#f8fafc;border:0;border-bottom:1px solid #e2e8f0;border-top-left-radius:12px;border-top-right-radius:12px"); h=QHBoxLayout(self.header); h.setContentsMargins(14,9,9,9); title=QLabel("●  Codex 任务总控台"); title.setFont(QFont("Noto Sans CJK SC",15,QFont.Bold)); title.setStyleSheet("color:#0f172a;border:0"); h.addWidget(title)
-        self.monitor_tab=QPushButton("任务监控"); self.todo_tab=QPushButton("今日待办"); self.learn_tab=QPushButton("等待学习")
-        for mode,button in (("monitor",self.monitor_tab),("todo",self.todo_tab),("learn",self.learn_tab)):
+        self.monitor_tab=QPushButton("任务监控"); self.todo_tab=QPushButton("今日待办"); self.learn_tab=QPushButton("等待学习"); self.system_tab=QPushButton("系统监控")
+        for mode,button in (("monitor",self.monitor_tab),("todo",self.todo_tab),("learn",self.learn_tab),("system",self.system_tab)):
             button.setCheckable(True); button.setCursor(Qt.PointingHandCursor); button.clicked.connect(lambda _,m=mode:self.switch_view(m)); h.addWidget(button)
         self.summary=QLabel(); self.summary.setStyleSheet("color:#475569;border:0"); h.addWidget(self.summary,1)
         scan_btn=QPushButton("刷新"); scan_btn.setToolTip("立即扫描 VS Code"); scan_btn.clicked.connect(self.refresh); h.addWidget(scan_btn)
@@ -302,7 +325,7 @@ class App(QWidget):
         for text,tip,fn in controls:
             button=QPushButton(text); button.setFixedSize(32,30); button.setToolTip(tip); button.setStyleSheet("QPushButton{padding:0;background:transparent;border:0;border-radius:7px;font-size:16px;color:#475569} QPushButton:hover{background:#e2e8f0}" if text!="×" else "QPushButton{padding:0;background:transparent;border:0;border-radius:7px;font-size:18px;color:#475569} QPushButton:hover{background:#fee2e2;color:#dc2626}"); button.clicked.connect(fn); h.addWidget(button)
         shell_layout.addWidget(self.header); self.area=QScrollArea(); self.area.setWidgetResizable(True); self.content=QWidget(); self.box=QVBoxLayout(self.content); self.box.setSpacing(7); self.area.setWidget(self.content); shell_layout.addWidget(self.area); self.root.addWidget(self.shell); self.refresh(); self.collapse()
-        self.timer=QTimer(self); self.timer.timeout.connect(self.periodic_refresh); self.timer.start(5000)
+        self.timer=QTimer(self); self.timer.timeout.connect(self.periodic_refresh); self.timer.start(5000); self.system_timer=QTimer(self); self.system_timer.timeout.connect(self.schedule_system_sample); self.system_timer.start(2000)
     def load(self):
         try:return json.loads(DATA.read_text())
         except Exception:return []
@@ -311,15 +334,18 @@ class App(QWidget):
         try:return json.loads(TODOS_FILE.read_text(encoding="utf-8"))
         except Exception:return []
     def save_todos(self):TODOS_FILE.write_text(json.dumps(self.todos,ensure_ascii=False,indent=2),encoding="utf-8")
-    def switch_view(self,mode):self.view_mode=mode; self.refresh()
+    def switch_view(self,mode):
+        self.view_mode=mode
+        if mode=="system":self.schedule_system_sample()
+        self.refresh()
     def update_tabs(self):
         active="QPushButton{padding:6px 12px;background:#4f46e5;color:white;border:0;border-radius:7px;font-weight:700}"
         normal="QPushButton{padding:6px 12px;background:#eef2ff;color:#475569;border:0;border-radius:7px} QPushButton:hover{background:#e0e7ff;color:#3730a3}"
-        for mode,button in (("monitor",self.monitor_tab),("todo",self.todo_tab),("learn",self.learn_tab)):
+        for mode,button in (("monitor",self.monitor_tab),("todo",self.todo_tab),("learn",self.learn_tab),("system",self.system_tab)):
             button.setChecked(self.view_mode==mode); button.setStyleSheet(active if self.view_mode==mode else normal)
     def periodic_refresh(self):
         before=(getattr(self,"running_count",0),getattr(self,"done_count",0),sum(w.get("completed",0)>self.seen.get(w.get("path",""),0) for w in self.windows))
-        self.refresh(render=self.view_mode=="monitor")
+        self.refresh(render=self.view_mode in ("monitor","system"))
         after=(self.running_count,self.done_count,sum(w.get("completed",0)>self.seen.get(w.get("path",""),0) for w in self.windows))
         if self.view_mode=="learn" and before!=after:self.refresh(render=True)
     def toggle(self):
@@ -353,7 +379,10 @@ class App(QWidget):
         if self.view_mode=="monitor":
             notice=f" · {unread} 待查看" if unread else ""; self.summary.setText(f"{self.running_count} 正在运行 · {self.done_count} 已完成{notice}")
         elif self.view_mode=="todo":self.summary.setText(f"{len(active_todos)} 项待办 · 今天完成 {len(done_today)}")
-        else:self.summary.setText(f"{self.running_count} 个任务运行中 · {len(self.feed_items)} 条前沿卡片")
+        elif self.view_mode=="learn":self.summary.setText(f"{self.running_count} 个任务运行中 · {len(self.feed_items)} 条前沿卡片")
+        else:
+            cpu=self.system_metrics.get("cpu",{}).get("percent",0); memory=self.system_metrics.get("memory",{}).get("percent",0); gpu=self.system_metrics.get("gpu",[]); gpu_text=f"GPU {gpu[0].get('percent',0):.0f}%" if gpu else "GPU --"
+            self.summary.setText(f"CPU {cpu:.0f}% · 内存 {memory:.0f}% · {gpu_text}")
         self.update_tabs(); self.bubble.setUnread(unread); self.bubble.setToolTip(f"运行 {self.running_count} · 完成 {self.done_count} · 待查看 {unread} · 今日待办 {len(active_todos)}")
         if not render:return
         self.clear()
@@ -362,8 +391,54 @@ class App(QWidget):
             for t in self.tasks:self.task_card(t)
             self.account_panel()
         elif self.view_mode=="todo":self.todo_panel()
-        else:self.learning_panel()
+        elif self.view_mode=="learn":self.learning_panel()
+        else:self.system_panel()
         self.box.addStretch()
+    def schedule_system_sample(self):
+        if self.view_mode!="system":return
+        if self.system_future and not self.system_future.done():return
+        self.system_future=self.system_executor.submit(self.system_monitor.snapshot)
+        QTimer.singleShot(80,self.poll_system_sample)
+    def poll_system_sample(self):
+        if not self.system_future:return
+        if not self.system_future.done():QTimer.singleShot(80,self.poll_system_sample); return
+        try:
+            self.system_metrics=self.system_future.result(); cpu=self.system_metrics["cpu"]; memory=self.system_metrics["memory"]; gpu=self.system_metrics["gpu"]; disks=self.system_metrics["disks"]
+            self.system_history["cpu"].append(cpu.get("percent",0)); self.system_history["memory"].append(memory.get("percent",0)); self.system_history["gpu"].append(gpu[0].get("percent",0) if gpu else 0); self.system_history["disk"].append(disks[0].get("percent",0) if disks else 0)
+        except Exception:
+            pass
+        self.system_future=None
+        if self.view_mode=="system":self.refresh(render=True)
+    def system_card(self,title,value,detail,color,key):
+        card=QFrame(); card.setObjectName("systemCard"); card.setStyleSheet(f"QFrame#systemCard{{background:white;border:1px solid #dbe3ed;border-radius:11px}} QLabel{{background:transparent}}"); layout=QVBoxLayout(card); layout.setContentsMargins(13,11,13,9); layout.setSpacing(3)
+        head=QHBoxLayout(); label=QLabel(title); label.setStyleSheet("color:#475569;font-size:11px;font-weight:700"); head.addWidget(label); head.addStretch(); indicator=QLabel("实时"); indicator.setStyleSheet(f"color:{color};background:{color}22;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700"); head.addWidget(indicator); layout.addLayout(head)
+        number=QLabel(value); number.setFont(QFont("Noto Sans CJK SC",21,QFont.Bold)); number.setStyleSheet(f"color:{color}"); layout.addWidget(number)
+        spark=Sparkline(color); spark.set_values(self.system_history.get(key,[])); spark.setFixedHeight(34); layout.addWidget(spark)
+        note=QLabel(detail); note.setStyleSheet("color:#64748b;font-size:10px"); note.setWordWrap(True); layout.addWidget(note)
+        return card
+    def system_panel(self):
+        metrics=self.system_metrics; cpu=metrics.get("cpu",{}); memory=metrics.get("memory",{}); gpus=metrics.get("gpu",[]); disks=metrics.get("disks",[]); network=metrics.get("network",{}); disk_io=metrics.get("disk_io",{})
+        panel=QFrame(); panel.setObjectName("systemPanel"); panel.setStyleSheet("QFrame#systemPanel{background:#f0fdfa;border:1px solid #99f6e4;border-radius:11px} QLabel{background:transparent}"); outer=QVBoxLayout(panel); outer.setContentsMargins(14,13,14,14); outer.setSpacing(10)
+        head=QHBoxLayout(); title=QLabel("系统监控"); title.setFont(QFont("Noto Sans CJK SC",16,QFont.Bold)); title.setStyleSheet("color:#134e4a"); head.addWidget(title); subtitle=QLabel("本机资源 · 2 秒采样 · 只保留内存中的最近曲线"); subtitle.setStyleSheet("color:#0f766e;font-size:11px"); head.addWidget(subtitle); head.addStretch(); head.addWidget(QLabel("不产生告警")); outer.addLayout(head)
+        grid=QGridLayout(); grid.setSpacing(8)
+        temp=f" · {cpu.get('temperature'):.0f}°C" if cpu.get("temperature") else " · 温度不可用"; memory_detail=f"{format_bytes(memory.get('used'))} / {format_bytes(memory.get('total'))} · 可用 {format_bytes(memory.get('available'))}" if memory.get("total") else "等待采样"
+        gpu_util=max((g.get("percent",0) for g in gpus),default=0); gpu_used=sum(g.get("used",0) for g in gpus); gpu_total=sum(g.get("total",0) for g in gpus); gpu_value=f"{gpu_util:.0f}%" if gpus else "--"; gpu_detail=(f"{len(gpus)} 张 · 显存 {format_bytes(gpu_used)} / {format_bytes(gpu_total)}" if gpus else "未检测到可用 NVIDIA 数据")
+        disk=disks[0] if disks else {}; disk_value=f"{disk.get('percent',0):.0f}%" if disk else "--"; disk_detail=f"{format_bytes(disk.get('free'))} 可用 · {disk.get('mount','/')}" if disk else "等待采样"
+        grid.addWidget(self.system_card("CPU",f"{cpu.get('percent',0):.0f}%",f"{cpu.get('cores',0)} 核 · 负载 {cpu.get('load',0):.2f}{temp}","#2563eb","cpu"),0,0); grid.addWidget(self.system_card("内存",f"{memory.get('percent',0):.0f}%",memory_detail,"#7c3aed","memory"),0,1); grid.addWidget(self.system_card("GPU / 显存",gpu_value,gpu_detail,"#ea580c","gpu"),1,0); grid.addWidget(self.system_card("磁盘",disk_value,disk_detail,"#059669","disk"),1,1); outer.addLayout(grid)
+        details=QFrame(); details.setStyleSheet("background:white;border:1px solid #ccfbf1;border-radius:9px"); detail_grid=QGridLayout(details); detail_grid.setContentsMargins(12,10,12,10); detail_grid.setHorizontalSpacing(28)
+        detail_grid.addWidget(QLabel("网络"),0,0); detail_grid.addWidget(QLabel(f"↓ {format_rate(network.get('download',0))}   ↑ {format_rate(network.get('upload',0))}"),1,0); detail_grid.addWidget(QLabel("磁盘读写"),0,1); detail_grid.addWidget(QLabel(f"读 {format_rate(disk_io.get('read',0))}   写 {format_rate(disk_io.get('write',0))}"),1,1); detail_grid.addWidget(QLabel("Swap"),0,2); detail_grid.addWidget(QLabel(f"{memory.get('swap_percent',0):.0f}% · {format_bytes(memory.get('swap_used'))} / {format_bytes(memory.get('swap_total'))}"),1,2)
+        for i in range(3):detail_grid.itemAtPosition(0,i).widget().setStyleSheet("color:#64748b;font-size:10px;font-weight:700"); detail_grid.itemAtPosition(1,i).widget().setStyleSheet("color:#0f172a;font-size:11px;font-weight:600")
+        outer.addWidget(details)
+        if gpus:
+            gpu_box=QFrame(); gpu_box.setStyleSheet("background:white;border:1px solid #fed7aa;border-radius:9px"); gpu_layout=QVBoxLayout(gpu_box); gpu_layout.setContentsMargins(12,9,12,9); gpu_layout.addWidget(QLabel("GPU 详情"))
+            for gpu in gpus:
+                row=QLabel(f"GPU {gpu.get('index')}  {gpu.get('name','未知')}    利用率 {gpu.get('percent',0):.0f}%    显存 {format_bytes(gpu.get('used'))}/{format_bytes(gpu.get('total'))}    温度 {gpu.get('temperature',0):.0f}°C    功耗 {gpu.get('power',0):.0f} W"); row.setStyleSheet("color:#475569;font-size:11px"); gpu_layout.addWidget(row)
+            outer.addWidget(gpu_box)
+        process_box=QFrame(); process_box.setStyleSheet("background:white;border:1px solid #dbe3ed;border-radius:9px"); process_layout=QVBoxLayout(process_box); process_layout.setContentsMargins(12,9,12,9); process_layout.addWidget(QLabel("高占用进程")); table=QTableWidget(min(5,len(metrics.get('processes',[]))),4); table.setHorizontalHeaderLabels(["进程","CPU","内存","PID"]); table.verticalHeader().setVisible(False); table.setEditTriggers(QAbstractItemView.NoEditTriggers); table.setSelectionMode(QAbstractItemView.NoSelection); table.setFocusPolicy(Qt.NoFocus); table.setShowGrid(False); table.setMinimumHeight(150); table.horizontalHeader().setSectionResizeMode(0,QHeaderView.Stretch)
+        for index,process in enumerate(metrics.get("processes",[])[:5]):
+            values=(process.get("name","进程"),f"{process.get('cpu',0):.1f}%",format_bytes(process.get("memory",0)),process.get("pid",""))
+            for column,value in enumerate(values):table.setItem(index,column,QTableWidgetItem(str(value)))
+        process_layout.addWidget(table); outer.addWidget(process_box); self.box.addWidget(panel)
     def window_panel(self):
         p=QFrame(); p.setStyleSheet("QFrame{background:#eef6ff;border-radius:10px} QLabel{background:transparent}"); v=QVBoxLayout(p); v.setSpacing(8)
         head=QHBoxLayout(); heading=QLabel("项目窗口"); heading.setFont(QFont("Noto Sans CJK SC",15,QFont.Bold)); heading.setStyleSheet("color:#0f172a"); head.addWidget(heading); head.addStretch(); running=QLabel(f"●  正在运行 {self.running_count}"); running.setStyleSheet("color:#1d4ed8;background:#dbeafe;padding:4px 9px;border-radius:6px;font-size:11px;font-weight:700"); head.addWidget(running); done=QLabel(f"✓  已完成 {self.done_count}"); done.setStyleSheet("color:#047857;background:#d1fae5;padding:4px 9px;border-radius:6px;font-size:11px;font-weight:700"); head.addWidget(done); v.addLayout(head)
@@ -589,6 +664,12 @@ class App(QWidget):
         pending=self.pending_accounts.get(w["path"]) if w else None
         if pending:self.switch_account(w,pending,True); return
         self.collapse(); subprocess.run(["wmctrl","-i","-a",wid]); QTimer.singleShot(250,self.ensure_on_top)
+    def closeEvent(self,event):
+        self.timer.stop(); self.system_timer.stop()
+        for executor in (self.feed_executor,self.system_executor):
+            try:executor.shutdown(wait=False,cancel_futures=True)
+            except TypeError:executor.shutdown(wait=False)
+        event.accept()
 
 def main():
     app=QApplication(sys.argv); app.setApplicationName("codex-control-tower"); app.setApplicationDisplayName("Codex 任务总控台");
