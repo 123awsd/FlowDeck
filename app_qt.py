@@ -51,11 +51,31 @@ def arxiv_robotics(limit=10):
         rows.append({"title":title,"abstract":summary,"published":published,"url":link})
     return rows
 
+def robotics_videos(limit=3):
+    channels=(("Google DeepMind","UCP7jMXSY2xbc3KCAE0MHQ-A",("robot","gemini robotics","embodied")),("Boston Dynamics","UC7vVhkEfw4nOGp8TyDk7RcQ",()),("NVIDIA Developer","UCBHcMCGaiJhv-ESTcWGJPcw",("robot","gr00t","isaac","physical ai","embodied")))
+    atom="http://www.w3.org/2005/Atom"; media="http://search.yahoo.com/mrss/"; yt="http://www.youtube.com/xml/schemas/2015"; rows=[]
+    for source,channel,keywords in channels:
+        try:
+            req=Request("https://www.youtube.com/feeds/videos.xml?channel_id="+channel,headers={"User-Agent":"Codex-Control-Tower/0.1"}); root=ET.fromstring(urlopen(req,timeout=15).read())
+            for entry in root.findall(f"{{{atom}}}entry"):
+                title=entry.findtext(f"{{{atom}}}title",default=""); description=entry.findtext(f"{{{media}}}group/{{{media}}}description",default=""); haystack=(title+" "+description).lower()
+                if keywords and not any(word in haystack for word in keywords):continue
+                video_id=entry.findtext(f"{{{yt}}}videoId",default=""); published=entry.findtext(f"{{{atom}}}published",default="")[:10]
+                rows.append({"kind":"video","source":source,"title":title,"abstract":" ".join(description.split())[:1800],"published":published,"url":"https://www.youtube.com/watch?v="+video_id,"seconds":60})
+        except Exception:pass
+    rows.sort(key=lambda x:x.get("published",""),reverse=True)
+    # Always keep one research-model demo when available; pure recency otherwise
+    # tends to fill a short pack with industrial shorts and hides VLA progress.
+    selected=[]; deepmind=next((x for x in rows if x.get("source")=="Google DeepMind"),None)
+    if deepmind and limit:selected.append(deepmind)
+    selected.extend(x for x in rows if x not in selected)
+    return selected[:limit]
+
 def deepseek_digest(papers):
     key=local_env("DEEPSEEK_API_KEY")
     if not key:raise RuntimeError("未配置 DeepSeek API Key")
-    compact=[{"index":i,"title":p["title"],"abstract":p["abstract"][:1800],"published":p["published"]} for i,p in enumerate(papers)]
-    prompt="""你是机器人研究前沿编辑。根据下面的最新 arXiv 条目输出严格 JSON 数组，不要 Markdown。每项字段：index(整数)、summary(不超过45字，说明解决什么)、delta(不超过55字，说明相对 OpenVLA/π0/GR00T/VLN 已有工作的具体增量；无法判断就如实说)、why(不超过45字，说明是否值得看及限制)、seconds(20/30/45/60之一)、tags(最多3个短标签数组)。不要把未在摘要出现的结果当事实。\n"""+json.dumps(compact,ensure_ascii=False)
+    compact=[{"index":i,"type":p.get("kind","paper"),"title":p["title"],"description":p["abstract"][:1800],"published":p["published"]} for i,p in enumerate(papers)]
+    prompt="""你是机器人研究前沿编辑。根据下面的最新论文和官方 Demo 视频条目输出严格 JSON 数组，不要 Markdown。每项字段：index(整数)、summary(不超过45字，说明展示或解决什么)、delta(不超过55字，说明相对 OpenVLA/π0/GR00T/VLN 已有工作的具体增量；无法判断就如实说)、why(不超过45字，说明是否值得看及限制)、seconds(20/30/45/60之一)、tags(最多3个短标签数组)。视频只能依据标题和描述，论文只能依据摘要；不要把未出现的结果当事实。\n"""+json.dumps(compact,ensure_ascii=False)
     payload={"model":"deepseek-v4-flash","messages":[{"role":"system","content":"只输出合法 JSON，忠于输入证据。"},{"role":"user","content":prompt}],"thinking":{"type":"disabled"},"stream":False,"temperature":0.2,"max_tokens":3000}
     req=Request("https://api.deepseek.com/chat/completions",data=json.dumps(payload).encode(),headers={"Content-Type":"application/json","Authorization":"Bearer "+key})
     response=json.loads(urlopen(req,timeout=45).read()); text=response["choices"][0]["message"]["content"].strip()
@@ -63,13 +83,15 @@ def deepseek_digest(papers):
     return json.loads(text)
 
 def build_learning_feed(count):
-    papers=arxiv_robotics(max(8,count)); error=""
-    try:digests=deepseek_digest(papers[:count]); by_index={int(x["index"]):x for x in digests}
+    video_count=2 if count<=6 else 3; entries=arxiv_robotics(max(8,count-video_count));
+    for paper in entries:paper.setdefault("kind","paper"); paper.setdefault("source","arXiv cs.RO")
+    entries=(robotics_videos(video_count)+entries[:max(2,count-video_count)])[:count]; entries.sort(key=lambda x:x.get("published",""),reverse=True); error=""
+    try:digests=deepseek_digest(entries); by_index={int(x["index"]):x for x in digests}
     except Exception as exc:by_index={}; error=str(exc)
     items=[]
-    for i,paper in enumerate(papers[:count]):
+    for i,paper in enumerate(entries):
         digest=by_index.get(i,{})
-        items.append({**paper,"summary":digest.get("summary") or paper["abstract"][:120]+("…" if len(paper["abstract"])>120 else ""),"delta":digest.get("delta") or "等待 AI 增量分析","why":digest.get("why") or "可查看原论文摘要与实验设置","seconds":digest.get("seconds",45),"tags":digest.get("tags",["机器人","arXiv"])})
+        items.append({**paper,"summary":digest.get("summary") or paper["abstract"][:120]+("…" if len(paper["abstract"])>120 else ""),"delta":digest.get("delta") or "等待 AI 增量分析","why":digest.get("why") or "可打开原始内容核对","seconds":digest.get("seconds",paper.get("seconds",45)),"tags":digest.get("tags",["机器人",paper.get("source","")])})
     FEED_CACHE.write_text(json.dumps({"updated_at":datetime.now().isoformat(timespec="seconds"),"items":items},ensure_ascii=False,indent=2),encoding="utf-8")
     return items,error
 
@@ -365,7 +387,11 @@ class App(QWidget):
         normal="QPushButton{padding:6px 12px;background:#eef2ff;color:#475569;border:0;border-radius:7px} QPushButton:hover{background:#e0e7ff;color:#3730a3}"
         for mode,button in (("monitor",self.monitor_tab),("todo",self.todo_tab),("learn",self.learn_tab)):
             button.setChecked(self.view_mode==mode); button.setStyleSheet(active if self.view_mode==mode else normal)
-    def periodic_refresh(self):self.refresh(render=self.view_mode=="monitor")
+    def periodic_refresh(self):
+        before=(getattr(self,"running_count",0),getattr(self,"done_count",0),sum(w.get("completed",0)>self.seen.get(w.get("path",""),0) for w in self.windows))
+        self.refresh(render=self.view_mode=="monitor")
+        after=(self.running_count,self.done_count,sum(w.get("completed",0)>self.seen.get(w.get("path",""),0) for w in self.windows))
+        if self.view_mode=="learn" and before!=after:self.refresh(render=True)
     def toggle(self):
         self.collapse() if self.expanded else self.expand()
     def expand(self):
@@ -454,7 +480,12 @@ class App(QWidget):
     def learning_panel(self):
         panel=QFrame(); panel.setObjectName("learningPanel"); panel.setStyleSheet("QFrame#learningPanel{background:#eff6ff;border:1px solid #bfdbfe;border-radius:11px} QLabel{background:transparent}"); v=QVBoxLayout(panel); v.setContentsMargins(14,13,14,14); v.setSpacing(9)
         head=QHBoxLayout(); title=QLabel("等待学习 · Robot Frontier"); title.setFont(QFont("Noto Sans CJK SC",16,QFont.Bold)); title.setStyleSheet("color:#172554"); head.addWidget(title); head.addStretch()
-        state=QLabel(f"● {self.running_count} 个 Codex 正在工作" if self.running_count else "当前没有运行中的任务"); state.setStyleSheet(f"color:{'#1d4ed8' if self.running_count else '#64748b'};background:{'#dbeafe' if self.running_count else '#e2e8f0'};padding:4px 9px;border-radius:6px;font-weight:700"); head.addWidget(state); v.addLayout(head)
+        needs_review=[w for w in self.windows if w.get("completed",0)>self.seen.get(w.get("path",""),0)]; state_text=f"● {self.running_count} 运行中 · {len(needs_review)} 待处理"; state=QLabel(state_text); state.setStyleSheet(f"color:{'#b91c1c' if needs_review else '#1d4ed8'};background:{'#fee2e2' if needs_review else '#dbeafe'};padding:4px 9px;border-radius:6px;font-weight:700"); head.addWidget(state); v.addLayout(head)
+        if needs_review:
+            alert=QFrame(); alert.setObjectName("workAlert"); alert.setStyleSheet("QFrame#workAlert{background:#fff1f2;border:1px solid #fda4af;border-radius:9px} QLabel{background:transparent}"); alerts=QVBoxLayout(alert); alerts.setContentsMargins(11,8,9,8); label=QLabel(f"有 {len(needs_review)} 个 Codex 任务已经完成，需要你处理"); label.setStyleSheet("color:#9f1239;font-weight:700"); alerts.addWidget(label)
+            for window in needs_review:
+                row=QHBoxLayout(); name=QLabel(window.get("folder","未命名项目")); name.setStyleSheet("color:#1e293b;font-weight:600"); row.addWidget(name,1); view=QPushButton("立即查看"); view.setStyleSheet("background:#dc2626;color:white;border:0;font-weight:700"); view.clicked.connect(lambda _,x=window:self.focus(x["id"])); row.addWidget(view); alerts.addLayout(row)
+            v.addWidget(alert)
         controls=QHBoxLayout(); hint=QLabel("只读增量，不做无限信息流"); hint.setStyleSheet("color:#475569;font-size:11px"); controls.addWidget(hint); controls.addStretch(); controls.addWidget(QLabel("学习时长"))
         duration=QComboBox(); duration.addItem("3 分钟",3); duration.addItem("5 分钟",5); duration.addItem("10 分钟",10); duration.addItem("20 分钟",20); duration.setCurrentIndex(duration.findData(getattr(self,"learning_minutes",5))); duration.currentIndexChanged.connect(lambda:self.set_learning_minutes(duration.currentData())); controls.addWidget(duration)
         refresh=QPushButton("获取最新"); refresh.setEnabled(not (self.feed_future and not self.feed_future.done())); refresh.setStyleSheet("background:#2563eb;color:white;border:0;font-weight:700"); refresh.clicked.connect(self.start_learning_feed); controls.addWidget(refresh); v.addLayout(controls)
@@ -467,12 +498,12 @@ class App(QWidget):
         saved=set(self.learning_state.get("saved",[]))
         for item in self.feed_items:
             card=QFrame(); card.setObjectName("learningCard"); card.setStyleSheet("QFrame#learningCard{background:white;border:1px solid #dbeafe;border-radius:9px}"); c=QVBoxLayout(card); c.setContentsMargins(12,10,12,10); c.setSpacing(6)
-            top=QHBoxLayout(); name=QLabel(item.get("title","未命名论文")); name.setWordWrap(True); name.setFont(QFont("Noto Sans CJK SC",13,QFont.Bold)); name.setStyleSheet("color:#0f172a"); top.addWidget(name,1); seconds=QLabel(f"{item.get('seconds',45)} 秒"); seconds.setStyleSheet("color:#0369a1;background:#e0f2fe;padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700"); top.addWidget(seconds); c.addLayout(top)
-            meta=QLabel(f"{item.get('published','日期未知')}  ·  "+" / ".join(item.get("tags",[])[:3])); meta.setStyleSheet("color:#64748b;font-size:10px"); c.addWidget(meta)
+            top=QHBoxLayout(); name=QLabel(item.get("title","未命名内容")); name.setWordWrap(True); name.setFont(QFont("Noto Sans CJK SC",13,QFont.Bold)); name.setStyleSheet("color:#0f172a"); top.addWidget(name,1); badge_text="▶ Demo 视频" if item.get("kind")=="video" else f"{item.get('seconds',45)} 秒读完"; seconds=QLabel(badge_text); seconds.setStyleSheet(f"color:{'#b91c1c' if item.get('kind')=='video' else '#0369a1'};background:{'#fee2e2' if item.get('kind')=='video' else '#e0f2fe'};padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700"); top.addWidget(seconds); c.addLayout(top)
+            meta=QLabel(f"{item.get('published','日期未知')}  ·  {item.get('source','')}  ·  "+" / ".join(item.get("tags",[])[:3])); meta.setStyleSheet("color:#64748b;font-size:10px"); c.addWidget(meta)
             summary=QLabel("解决什么："+item.get("summary","")); summary.setWordWrap(True); summary.setStyleSheet("color:#1e293b;font-size:12px;font-weight:600"); c.addWidget(summary)
             delta=QLabel("相对已有工作："+item.get("delta","")); delta.setWordWrap(True); delta.setStyleSheet("color:#4338ca;font-size:11px"); c.addWidget(delta)
             why=QLabel("为什么值得看："+item.get("why","")); why.setWordWrap(True); why.setStyleSheet("color:#475569;font-size:11px"); c.addWidget(why)
-            actions=QHBoxLayout(); actions.addStretch(); original=QPushButton("查看原文"); original.clicked.connect(lambda _,u=item.get("url",""):self.open_learning_url(u)); actions.addWidget(original); mark=QPushButton("已收藏" if item.get("url") in saved else "收藏深读"); mark.setStyleSheet("background:#ede9fe;color:#6d28d9;border:0" if item.get("url") in saved else ""); mark.clicked.connect(lambda _,u=item.get("url",""):self.toggle_learning_saved(u)); actions.addWidget(mark); c.addLayout(actions); v.addWidget(card)
+            actions=QHBoxLayout(); actions.addStretch(); original=QPushButton("播放视频" if item.get("kind")=="video" else "查看原文"); original.setStyleSheet("background:#dc2626;color:white;border:0" if item.get("kind")=="video" else ""); original.clicked.connect(lambda _,u=item.get("url",""):self.open_learning_url(u)); actions.addWidget(original); mark=QPushButton("已收藏" if item.get("url") in saved else "收藏深读"); mark.setStyleSheet("background:#ede9fe;color:#6d28d9;border:0" if item.get("url") in saved else ""); mark.clicked.connect(lambda _,u=item.get("url",""):self.toggle_learning_saved(u)); actions.addWidget(mark); c.addLayout(actions); v.addWidget(card)
         self.box.addWidget(panel)
     def set_learning_minutes(self,value):self.learning_minutes=int(value or 5)
     def start_learning_feed(self):
