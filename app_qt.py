@@ -1,9 +1,12 @@
 """Qt UI: crisp Chinese text, VS Code discovery and task management."""
-import hashlib, json, sqlite3, subprocess, sys, uuid
+import hashlib, json, os, sqlite3, subprocess, sys, uuid
 import time
+import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urlencode, urlparse
+from urllib.request import Request, urlopen
 try:
     from PySide6.QtCore import Qt, QTimer
     from PySide6.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPen
@@ -13,7 +16,7 @@ except ImportError:
     from PyQt5.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPen
     from PyQt5.QtWidgets import *
 
-BASE=Path(__file__).resolve().parent; DATA=BASE/"tasks.json"; TODOS_FILE=BASE/"daily_todos.json"; EVENTS=BASE/"events.jsonl"
+BASE=Path(__file__).resolve().parent; DATA=BASE/"tasks.json"; TODOS_FILE=BASE/"daily_todos.json"; EVENTS=BASE/"events.jsonl"; FEED_CACHE=BASE/"learning_feed.json"; LEARNING_STATE=BASE/"learning_state.json"
 PROFILE_FILE=Path.home()/".config/Code/User/globalStorage/woozy-masta.codex-switch/profiles.json"
 GLOBAL_DB=Path.home()/".config/Code/User/globalStorage/state.vscdb"
 SEEN_FILE=BASE/"seen_sessions.json"
@@ -26,6 +29,49 @@ _SESSION_HEADERS={}
 _SESSION_STREAMS={}
 _CONVERSATION_TITLES={}
 _LAST_BRIDGE_CLEANUP=0
+
+def local_env(name):
+    value=os.environ.get(name)
+    if value:return value
+    try:
+        for line in (BASE/".env").read_text(encoding="utf-8").splitlines():
+            key,sep,item=line.partition("=")
+            if sep and key.strip()==name:return item.strip().strip('"').strip("'")
+    except Exception:pass
+    return ""
+
+def arxiv_robotics(limit=10):
+    query='cat:cs.RO AND (all:"vision language action" OR all:"embodied AI" OR all:"robot learning" OR all:"vision language navigation")'
+    url="https://export.arxiv.org/api/query?"+urlencode({"search_query":query,"start":0,"max_results":limit,"sortBy":"submittedDate","sortOrder":"descending"})
+    request=Request(url,headers={"User-Agent":"Codex-Control-Tower/0.1 (personal research reader)"})
+    root=ET.fromstring(urlopen(request,timeout=20).read()); ns={"a":"http://www.w3.org/2005/Atom"}; rows=[]
+    for entry in root.findall("a:entry",ns):
+        title=" ".join((entry.findtext("a:title",default="",namespaces=ns)).split()); summary=" ".join((entry.findtext("a:summary",default="",namespaces=ns)).split()); published=entry.findtext("a:published",default="",namespaces=ns)[:10]
+        link=next((x.get("href") for x in entry.findall("a:link",ns) if x.get("rel")=="alternate"),entry.findtext("a:id",default="",namespaces=ns))
+        rows.append({"title":title,"abstract":summary,"published":published,"url":link})
+    return rows
+
+def deepseek_digest(papers):
+    key=local_env("DEEPSEEK_API_KEY")
+    if not key:raise RuntimeError("未配置 DeepSeek API Key")
+    compact=[{"index":i,"title":p["title"],"abstract":p["abstract"][:1800],"published":p["published"]} for i,p in enumerate(papers)]
+    prompt="""你是机器人研究前沿编辑。根据下面的最新 arXiv 条目输出严格 JSON 数组，不要 Markdown。每项字段：index(整数)、summary(不超过45字，说明解决什么)、delta(不超过55字，说明相对 OpenVLA/π0/GR00T/VLN 已有工作的具体增量；无法判断就如实说)、why(不超过45字，说明是否值得看及限制)、seconds(20/30/45/60之一)、tags(最多3个短标签数组)。不要把未在摘要出现的结果当事实。\n"""+json.dumps(compact,ensure_ascii=False)
+    payload={"model":"deepseek-v4-flash","messages":[{"role":"system","content":"只输出合法 JSON，忠于输入证据。"},{"role":"user","content":prompt}],"thinking":{"type":"disabled"},"stream":False,"temperature":0.2,"max_tokens":3000}
+    req=Request("https://api.deepseek.com/chat/completions",data=json.dumps(payload).encode(),headers={"Content-Type":"application/json","Authorization":"Bearer "+key})
+    response=json.loads(urlopen(req,timeout=45).read()); text=response["choices"][0]["message"]["content"].strip()
+    if text.startswith("```"):text=text.split("\n",1)[1].rsplit("```",1)[0]
+    return json.loads(text)
+
+def build_learning_feed(count):
+    papers=arxiv_robotics(max(8,count)); error=""
+    try:digests=deepseek_digest(papers[:count]); by_index={int(x["index"]):x for x in digests}
+    except Exception as exc:by_index={}; error=str(exc)
+    items=[]
+    for i,paper in enumerate(papers[:count]):
+        digest=by_index.get(i,{})
+        items.append({**paper,"summary":digest.get("summary") or paper["abstract"][:120]+("…" if len(paper["abstract"])>120 else ""),"delta":digest.get("delta") or "等待 AI 增量分析","why":digest.get("why") or "可查看原论文摘要与实验设置","seconds":digest.get("seconds",45),"tags":digest.get("tags",["机器人","arXiv"])})
+    FEED_CACHE.write_text(json.dumps({"updated_at":datetime.now().isoformat(timespec="seconds"),"items":items},ensure_ascii=False,indent=2),encoding="utf-8")
+    return items,error
 
 def global_point(event):
     return event.globalPosition().toPoint() if hasattr(event,"globalPosition") else event.globalPos()
@@ -283,7 +329,11 @@ class DraggableHeader(QFrame):
 
 class App(QWidget):
     def __init__(self):
-        super().__init__(); self.tasks=self.load(); self.todos=self.load_todos(); self.view_mode="monitor"; self.windows=[]; self.expanded=False; self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}
+        super().__init__(); self.tasks=self.load(); self.todos=self.load_todos(); self.view_mode="monitor"; self.windows=[]; self.expanded=False; self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}; self.feed_items=[]; self.feed_error=""; self.feed_future=None; self.feed_executor=ThreadPoolExecutor(max_workers=1)
+        try:self.learning_state=json.loads(LEARNING_STATE.read_text(encoding="utf-8"))
+        except Exception:self.learning_state={"saved":[]}
+        try:self.feed_items=json.loads(FEED_CACHE.read_text(encoding="utf-8")).get("items",[])
+        except Exception:pass
         try:self.seen=json.loads(SEEN_FILE.read_text())
         except Exception:self.seen={}
         self.setWindowTitle("Codex 任务总控台"); self.setWindowIcon(QIcon(str(BASE/"assets/codex-control-tower.svg"))); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setAttribute(Qt.WA_TranslucentBackground,True); self.setObjectName("root")
@@ -291,8 +341,8 @@ class App(QWidget):
         self.root=QVBoxLayout(self); self.root.setContentsMargins(0,0,0,0); self.root.setSpacing(4); self.bubble=BubbleButton(); self.bubble.setFixedSize(58,58); self.bubble.setToolTip("点击展开，拖动可移动"); shadow=QGraphicsDropShadowEffect(self); shadow.setBlurRadius(18); shadow.setOffset(0,4); shadow.setColor(QColor(15,23,42,120)); self.bubble.setGraphicsEffect(shadow); self.bubble.clicked.connect(self.toggle); self.root.addWidget(self.bubble)
         self.shell=QFrame(); self.shell.setObjectName("shell"); self.shell.setStyleSheet("QFrame#shell{background:#f8fafc;border:1px solid #dbe3ed;border-radius:12px}"); shell_layout=QVBoxLayout(self.shell); shell_layout.setContentsMargins(0,0,0,0); shell_layout.setSpacing(0)
         self.header=DraggableHeader(); self.header.setStyleSheet("background:#f8fafc;border:0;border-bottom:1px solid #e2e8f0;border-top-left-radius:12px;border-top-right-radius:12px"); h=QHBoxLayout(self.header); h.setContentsMargins(14,9,9,9); title=QLabel("●  Codex 任务总控台"); title.setFont(QFont("Noto Sans CJK SC",15,QFont.Bold)); title.setStyleSheet("color:#0f172a;border:0"); h.addWidget(title)
-        self.monitor_tab=QPushButton("任务监控"); self.todo_tab=QPushButton("今日待办")
-        for mode,button in (("monitor",self.monitor_tab),("todo",self.todo_tab)):
+        self.monitor_tab=QPushButton("任务监控"); self.todo_tab=QPushButton("今日待办"); self.learn_tab=QPushButton("等待学习")
+        for mode,button in (("monitor",self.monitor_tab),("todo",self.todo_tab),("learn",self.learn_tab)):
             button.setCheckable(True); button.setCursor(Qt.PointingHandCursor); button.clicked.connect(lambda _,m=mode:self.switch_view(m)); h.addWidget(button)
         self.summary=QLabel(); self.summary.setStyleSheet("color:#475569;border:0"); h.addWidget(self.summary,1)
         scan_btn=QPushButton("刷新"); scan_btn.setToolTip("立即扫描 VS Code"); scan_btn.clicked.connect(self.refresh); h.addWidget(scan_btn)
@@ -313,7 +363,7 @@ class App(QWidget):
     def update_tabs(self):
         active="QPushButton{padding:6px 12px;background:#4f46e5;color:white;border:0;border-radius:7px;font-weight:700}"
         normal="QPushButton{padding:6px 12px;background:#eef2ff;color:#475569;border:0;border-radius:7px} QPushButton:hover{background:#e0e7ff;color:#3730a3}"
-        for mode,button in (("monitor",self.monitor_tab),("todo",self.todo_tab)):
+        for mode,button in (("monitor",self.monitor_tab),("todo",self.todo_tab),("learn",self.learn_tab)):
             button.setChecked(self.view_mode==mode); button.setStyleSheet(active if self.view_mode==mode else normal)
     def periodic_refresh(self):self.refresh(render=self.view_mode=="monitor")
     def toggle(self):
@@ -346,7 +396,8 @@ class App(QWidget):
         active_todos=[t for t in self.todos if not t.get("done")]; done_today=[t for t in self.todos if t.get("done") and t.get("done_date")==datetime.now().strftime("%Y-%m-%d")]
         if self.view_mode=="monitor":
             notice=f" · {unread} 待查看" if unread else ""; self.summary.setText(f"{self.running_count} 正在运行 · {self.done_count} 已完成{notice}")
-        else:self.summary.setText(f"{len(active_todos)} 项待办 · 今天完成 {len(done_today)}")
+        elif self.view_mode=="todo":self.summary.setText(f"{len(active_todos)} 项待办 · 今天完成 {len(done_today)}")
+        else:self.summary.setText(f"{self.running_count} 个任务运行中 · {len(self.feed_items)} 条前沿卡片")
         self.update_tabs(); self.bubble.setUnread(unread); self.bubble.setToolTip(f"运行 {self.running_count} · 完成 {self.done_count} · 待查看 {unread} · 今日待办 {len(active_todos)}")
         if not render:return
         self.clear()
@@ -354,7 +405,8 @@ class App(QWidget):
             self.window_panel()
             for t in self.tasks:self.task_card(t)
             self.account_panel()
-        else:self.todo_panel()
+        elif self.view_mode=="todo":self.todo_panel()
+        else:self.learning_panel()
         self.box.addStretch()
     def window_panel(self):
         p=QFrame(); p.setStyleSheet("QFrame{background:#eef6ff;border-radius:10px} QLabel{background:transparent}"); v=QVBoxLayout(p); v.setSpacing(8)
@@ -399,6 +451,47 @@ class App(QWidget):
                 value=window.get("remainingPercent"); row=QHBoxLayout(); caption=QLabel(label); caption.setStyleSheet("color:#64748b;font-size:10px"); row.addWidget(caption); row.addStretch(); number=QLabel(f"{value if value is not None else '--'}%"); number.setStyleSheet("color:#047857;font-size:10px;font-weight:700"); row.addWidget(number); c.addLayout(row); reset=QLabel(f"{remaining_label(window.get('resetsAt'))} · {reset_label(window.get('resetsAt'))}"); reset.setStyleSheet("color:#94a3b8;font-size:9px"); c.addWidget(reset); bar=QProgressBar(); bar.setTextVisible(False); bar.setRange(0,100); bar.setValue(value or 0); c.addWidget(bar)
             h.addWidget(card)
         h.addStretch(); v.addLayout(h); self.box.addWidget(p)
+    def learning_panel(self):
+        panel=QFrame(); panel.setObjectName("learningPanel"); panel.setStyleSheet("QFrame#learningPanel{background:#eff6ff;border:1px solid #bfdbfe;border-radius:11px} QLabel{background:transparent}"); v=QVBoxLayout(panel); v.setContentsMargins(14,13,14,14); v.setSpacing(9)
+        head=QHBoxLayout(); title=QLabel("等待学习 · Robot Frontier"); title.setFont(QFont("Noto Sans CJK SC",16,QFont.Bold)); title.setStyleSheet("color:#172554"); head.addWidget(title); head.addStretch()
+        state=QLabel(f"● {self.running_count} 个 Codex 正在工作" if self.running_count else "当前没有运行中的任务"); state.setStyleSheet(f"color:{'#1d4ed8' if self.running_count else '#64748b'};background:{'#dbeafe' if self.running_count else '#e2e8f0'};padding:4px 9px;border-radius:6px;font-weight:700"); head.addWidget(state); v.addLayout(head)
+        controls=QHBoxLayout(); hint=QLabel("只读增量，不做无限信息流"); hint.setStyleSheet("color:#475569;font-size:11px"); controls.addWidget(hint); controls.addStretch(); controls.addWidget(QLabel("学习时长"))
+        duration=QComboBox(); duration.addItem("3 分钟",3); duration.addItem("5 分钟",5); duration.addItem("10 分钟",10); duration.addItem("20 分钟",20); duration.setCurrentIndex(duration.findData(getattr(self,"learning_minutes",5))); duration.currentIndexChanged.connect(lambda:self.set_learning_minutes(duration.currentData())); controls.addWidget(duration)
+        refresh=QPushButton("获取最新"); refresh.setEnabled(not (self.feed_future and not self.feed_future.done())); refresh.setStyleSheet("background:#2563eb;color:white;border:0;font-weight:700"); refresh.clicked.connect(self.start_learning_feed); controls.addWidget(refresh); v.addLayout(controls)
+        if self.feed_future and not self.feed_future.done():
+            loading=QLabel("正在读取最新 arXiv 论文并生成增量摘要…"); loading.setAlignment(Qt.AlignCenter); loading.setStyleSheet("color:#1d4ed8;background:white;padding:22px;border-radius:9px;font-weight:700"); v.addWidget(loading)
+        elif not self.feed_items:
+            empty=QLabel("点击“获取最新”，生成第一份机器人前沿学习包"); empty.setAlignment(Qt.AlignCenter); empty.setStyleSheet("color:#64748b;background:white;padding:26px;border-radius:9px"); v.addWidget(empty)
+        if self.feed_error:
+            warning=QLabel("AI 摘要暂不可用，已显示论文原始摘要 · "+self.feed_error[:100]); warning.setWordWrap(True); warning.setStyleSheet("color:#b45309;background:#fffbeb;padding:7px 9px;border-radius:6px;font-size:10px"); v.addWidget(warning)
+        saved=set(self.learning_state.get("saved",[]))
+        for item in self.feed_items:
+            card=QFrame(); card.setObjectName("learningCard"); card.setStyleSheet("QFrame#learningCard{background:white;border:1px solid #dbeafe;border-radius:9px}"); c=QVBoxLayout(card); c.setContentsMargins(12,10,12,10); c.setSpacing(6)
+            top=QHBoxLayout(); name=QLabel(item.get("title","未命名论文")); name.setWordWrap(True); name.setFont(QFont("Noto Sans CJK SC",13,QFont.Bold)); name.setStyleSheet("color:#0f172a"); top.addWidget(name,1); seconds=QLabel(f"{item.get('seconds',45)} 秒"); seconds.setStyleSheet("color:#0369a1;background:#e0f2fe;padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700"); top.addWidget(seconds); c.addLayout(top)
+            meta=QLabel(f"{item.get('published','日期未知')}  ·  "+" / ".join(item.get("tags",[])[:3])); meta.setStyleSheet("color:#64748b;font-size:10px"); c.addWidget(meta)
+            summary=QLabel("解决什么："+item.get("summary","")); summary.setWordWrap(True); summary.setStyleSheet("color:#1e293b;font-size:12px;font-weight:600"); c.addWidget(summary)
+            delta=QLabel("相对已有工作："+item.get("delta","")); delta.setWordWrap(True); delta.setStyleSheet("color:#4338ca;font-size:11px"); c.addWidget(delta)
+            why=QLabel("为什么值得看："+item.get("why","")); why.setWordWrap(True); why.setStyleSheet("color:#475569;font-size:11px"); c.addWidget(why)
+            actions=QHBoxLayout(); actions.addStretch(); original=QPushButton("查看原文"); original.clicked.connect(lambda _,u=item.get("url",""):self.open_learning_url(u)); actions.addWidget(original); mark=QPushButton("已收藏" if item.get("url") in saved else "收藏深读"); mark.setStyleSheet("background:#ede9fe;color:#6d28d9;border:0" if item.get("url") in saved else ""); mark.clicked.connect(lambda _,u=item.get("url",""):self.toggle_learning_saved(u)); actions.addWidget(mark); c.addLayout(actions); v.addWidget(card)
+        self.box.addWidget(panel)
+    def set_learning_minutes(self,value):self.learning_minutes=int(value or 5)
+    def start_learning_feed(self):
+        if self.feed_future and not self.feed_future.done():return
+        count={3:4,5:6,10:9,20:12}.get(getattr(self,"learning_minutes",5),6); self.feed_error=""; self.feed_future=self.feed_executor.submit(build_learning_feed,count); self.refresh(); QTimer.singleShot(250,self.poll_learning_feed)
+    def poll_learning_feed(self):
+        if not self.feed_future:return
+        if not self.feed_future.done():QTimer.singleShot(250,self.poll_learning_feed); return
+        try:self.feed_items,self.feed_error=self.feed_future.result()
+        except Exception as exc:self.feed_error=str(exc)
+        self.feed_future=None
+        if self.view_mode=="learn":self.refresh()
+    def open_learning_url(self,url):
+        if url:subprocess.Popen(["xdg-open",url],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    def toggle_learning_saved(self,url):
+        saved=self.learning_state.setdefault("saved",[])
+        if url in saved:saved.remove(url)
+        elif url:saved.append(url)
+        LEARNING_STATE.write_text(json.dumps(self.learning_state,ensure_ascii=False,indent=2),encoding="utf-8"); self.refresh()
     def todo_panel(self):
         today=datetime.now().strftime("%Y-%m-%d"); visible=[t for t in self.todos if not t.get("done") or t.get("done_date")==today]
         priority_order={"高":0,"中":1,"低":2}; visible.sort(key=lambda t:(bool(t.get("done")),priority_order.get(t.get("priority","中"),1),t.get("created_at","")))

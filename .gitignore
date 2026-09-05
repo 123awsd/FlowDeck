@@ -7,6 +7,8 @@ tasks.json
 daily_todos.json
 seen_sessions.json
 events.jsonl
+learning_feed.json
+learning_state.json
 
 # Generated extension packages and accidental window dumps
 *.vsix
@@ -15,3 +17,6 @@ events.jsonl
 # Logs and temporary files
 *.log
 *.tmp
+
+# Local API credentials
+.env
