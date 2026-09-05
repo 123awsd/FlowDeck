@@ -1,12 +1,11 @@
 """Qt UI: crisp Chinese text, VS Code discovery and task management."""
-import hashlib, json, os, sqlite3, subprocess, sys, uuid
+import hashlib, json, sqlite3, subprocess, sys, uuid
 import time
-import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import unquote, urlencode, urlparse
-from urllib.request import Request, urlopen
+from urllib.parse import unquote, urlparse
+from learning_feed import Store as LearningStore, build_feed as build_learning_feed_v2, context_profile
 try:
     from PySide6.QtCore import Qt, QTimer
     from PySide6.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPen
@@ -16,7 +15,7 @@ except ImportError:
     from PyQt5.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPen
     from PyQt5.QtWidgets import *
 
-BASE=Path(__file__).resolve().parent; DATA=BASE/"tasks.json"; TODOS_FILE=BASE/"daily_todos.json"; EVENTS=BASE/"events.jsonl"; FEED_CACHE=BASE/"learning_feed.json"; LEARNING_STATE=BASE/"learning_state.json"
+BASE=Path(__file__).resolve().parent; DATA=BASE/"tasks.json"; TODOS_FILE=BASE/"daily_todos.json"; EVENTS=BASE/"events.jsonl"
 PROFILE_FILE=Path.home()/".config/Code/User/globalStorage/woozy-masta.codex-switch/profiles.json"
 GLOBAL_DB=Path.home()/".config/Code/User/globalStorage/state.vscdb"
 SEEN_FILE=BASE/"seen_sessions.json"
@@ -29,71 +28,6 @@ _SESSION_HEADERS={}
 _SESSION_STREAMS={}
 _CONVERSATION_TITLES={}
 _LAST_BRIDGE_CLEANUP=0
-
-def local_env(name):
-    value=os.environ.get(name)
-    if value:return value
-    try:
-        for line in (BASE/".env").read_text(encoding="utf-8").splitlines():
-            key,sep,item=line.partition("=")
-            if sep and key.strip()==name:return item.strip().strip('"').strip("'")
-    except Exception:pass
-    return ""
-
-def arxiv_robotics(limit=10):
-    query='cat:cs.RO AND (all:"vision language action" OR all:"embodied AI" OR all:"robot learning" OR all:"vision language navigation")'
-    url="https://export.arxiv.org/api/query?"+urlencode({"search_query":query,"start":0,"max_results":limit,"sortBy":"submittedDate","sortOrder":"descending"})
-    request=Request(url,headers={"User-Agent":"Codex-Control-Tower/0.1 (personal research reader)"})
-    root=ET.fromstring(urlopen(request,timeout=20).read()); ns={"a":"http://www.w3.org/2005/Atom"}; rows=[]
-    for entry in root.findall("a:entry",ns):
-        title=" ".join((entry.findtext("a:title",default="",namespaces=ns)).split()); summary=" ".join((entry.findtext("a:summary",default="",namespaces=ns)).split()); published=entry.findtext("a:published",default="",namespaces=ns)[:10]
-        link=next((x.get("href") for x in entry.findall("a:link",ns) if x.get("rel")=="alternate"),entry.findtext("a:id",default="",namespaces=ns))
-        rows.append({"title":title,"abstract":summary,"published":published,"url":link})
-    return rows
-
-def robotics_videos(limit=3):
-    channels=(("Google DeepMind","UCP7jMXSY2xbc3KCAE0MHQ-A",("robot","gemini robotics","embodied")),("Boston Dynamics","UC7vVhkEfw4nOGp8TyDk7RcQ",()),("NVIDIA Developer","UCBHcMCGaiJhv-ESTcWGJPcw",("robot","gr00t","isaac","physical ai","embodied")))
-    atom="http://www.w3.org/2005/Atom"; media="http://search.yahoo.com/mrss/"; yt="http://www.youtube.com/xml/schemas/2015"; rows=[]
-    for source,channel,keywords in channels:
-        try:
-            req=Request("https://www.youtube.com/feeds/videos.xml?channel_id="+channel,headers={"User-Agent":"Codex-Control-Tower/0.1"}); root=ET.fromstring(urlopen(req,timeout=15).read())
-            for entry in root.findall(f"{{{atom}}}entry"):
-                title=entry.findtext(f"{{{atom}}}title",default=""); description=entry.findtext(f"{{{media}}}group/{{{media}}}description",default=""); haystack=(title+" "+description).lower()
-                if keywords and not any(word in haystack for word in keywords):continue
-                video_id=entry.findtext(f"{{{yt}}}videoId",default=""); published=entry.findtext(f"{{{atom}}}published",default="")[:10]
-                rows.append({"kind":"video","source":source,"title":title,"abstract":" ".join(description.split())[:1800],"published":published,"url":"https://www.youtube.com/watch?v="+video_id,"seconds":60})
-        except Exception:pass
-    rows.sort(key=lambda x:x.get("published",""),reverse=True)
-    # Always keep one research-model demo when available; pure recency otherwise
-    # tends to fill a short pack with industrial shorts and hides VLA progress.
-    selected=[]; deepmind=next((x for x in rows if x.get("source")=="Google DeepMind"),None)
-    if deepmind and limit:selected.append(deepmind)
-    selected.extend(x for x in rows if x not in selected)
-    return selected[:limit]
-
-def deepseek_digest(papers):
-    key=local_env("DEEPSEEK_API_KEY")
-    if not key:raise RuntimeError("未配置 DeepSeek API Key")
-    compact=[{"index":i,"type":p.get("kind","paper"),"title":p["title"],"description":p["abstract"][:1800],"published":p["published"]} for i,p in enumerate(papers)]
-    prompt="""你是机器人研究前沿编辑。根据下面的最新论文和官方 Demo 视频条目输出严格 JSON 数组，不要 Markdown。每项字段：index(整数)、summary(不超过45字，说明展示或解决什么)、delta(不超过55字，说明相对 OpenVLA/π0/GR00T/VLN 已有工作的具体增量；无法判断就如实说)、why(不超过45字，说明是否值得看及限制)、seconds(20/30/45/60之一)、tags(最多3个短标签数组)。视频只能依据标题和描述，论文只能依据摘要；不要把未出现的结果当事实。\n"""+json.dumps(compact,ensure_ascii=False)
-    payload={"model":"deepseek-v4-flash","messages":[{"role":"system","content":"只输出合法 JSON，忠于输入证据。"},{"role":"user","content":prompt}],"thinking":{"type":"disabled"},"stream":False,"temperature":0.2,"max_tokens":3000}
-    req=Request("https://api.deepseek.com/chat/completions",data=json.dumps(payload).encode(),headers={"Content-Type":"application/json","Authorization":"Bearer "+key})
-    response=json.loads(urlopen(req,timeout=45).read()); text=response["choices"][0]["message"]["content"].strip()
-    if text.startswith("```"):text=text.split("\n",1)[1].rsplit("```",1)[0]
-    return json.loads(text)
-
-def build_learning_feed(count):
-    video_count=2 if count<=6 else 3; entries=arxiv_robotics(max(8,count-video_count));
-    for paper in entries:paper.setdefault("kind","paper"); paper.setdefault("source","arXiv cs.RO")
-    entries=(robotics_videos(video_count)+entries[:max(2,count-video_count)])[:count]; entries.sort(key=lambda x:x.get("published",""),reverse=True); error=""
-    try:digests=deepseek_digest(entries); by_index={int(x["index"]):x for x in digests}
-    except Exception as exc:by_index={}; error=str(exc)
-    items=[]
-    for i,paper in enumerate(entries):
-        digest=by_index.get(i,{})
-        items.append({**paper,"summary":digest.get("summary") or paper["abstract"][:120]+("…" if len(paper["abstract"])>120 else ""),"delta":digest.get("delta") or "等待 AI 增量分析","why":digest.get("why") or "可打开原始内容核对","seconds":digest.get("seconds",paper.get("seconds",45)),"tags":digest.get("tags",["机器人",paper.get("source","")])})
-    FEED_CACHE.write_text(json.dumps({"updated_at":datetime.now().isoformat(timespec="seconds"),"items":items},ensure_ascii=False,indent=2),encoding="utf-8")
-    return items,error
 
 def global_point(event):
     return event.globalPosition().toPoint() if hasattr(event,"globalPosition") else event.globalPos()
@@ -351,11 +285,7 @@ class DraggableHeader(QFrame):
 
 class App(QWidget):
     def __init__(self):
-        super().__init__(); self.tasks=self.load(); self.todos=self.load_todos(); self.view_mode="monitor"; self.windows=[]; self.expanded=False; self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}; self.feed_items=[]; self.feed_error=""; self.feed_future=None; self.feed_executor=ThreadPoolExecutor(max_workers=1)
-        try:self.learning_state=json.loads(LEARNING_STATE.read_text(encoding="utf-8"))
-        except Exception:self.learning_state={"saved":[]}
-        try:self.feed_items=json.loads(FEED_CACHE.read_text(encoding="utf-8")).get("items",[])
-        except Exception:pass
+        super().__init__(); self.tasks=self.load(); self.todos=self.load_todos(); self.view_mode="monitor"; self.windows=[]; self.expanded=False; self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}; self.feed_error=""; self.feed_future=None; self.feed_executor=ThreadPoolExecutor(max_workers=1); self.feed_store=LearningStore(); self.feed_items=self.feed_store.recent(12); self.feed_stats=self.feed_store.stats(); self.learning_context={"label":"机器人前沿","terms":[]}
         try:self.seen=json.loads(SEEN_FILE.read_text())
         except Exception:self.seen={}
         self.setWindowTitle("Codex 任务总控台"); self.setWindowIcon(QIcon(str(BASE/"assets/codex-control-tower.svg"))); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setAttribute(Qt.WA_TranslucentBackground,True); self.setObjectName("root")
@@ -486,43 +416,51 @@ class App(QWidget):
             for window in needs_review:
                 row=QHBoxLayout(); name=QLabel(window.get("folder","未命名项目")); name.setStyleSheet("color:#1e293b;font-weight:600"); row.addWidget(name,1); view=QPushButton("立即查看"); view.setStyleSheet("background:#dc2626;color:white;border:0;font-weight:700"); view.clicked.connect(lambda _,x=window:self.focus(x["id"])); row.addWidget(view); alerts.addLayout(row)
             v.addWidget(alert)
-        controls=QHBoxLayout(); hint=QLabel("只读增量，不做无限信息流"); hint.setStyleSheet("color:#475569;font-size:11px"); controls.addWidget(hint); controls.addStretch(); controls.addWidget(QLabel("学习时长"))
+        controls=QHBoxLayout(); hint=QLabel("当前推荐："+self.learning_context.get("label","机器人前沿")+" · 只读增量，不做无限信息流"); hint.setStyleSheet("color:#475569;font-size:11px"); controls.addWidget(hint); controls.addStretch(); controls.addWidget(QLabel("学习时长"))
         duration=QComboBox(); duration.addItem("3 分钟",3); duration.addItem("5 分钟",5); duration.addItem("10 分钟",10); duration.addItem("20 分钟",20); duration.setCurrentIndex(duration.findData(getattr(self,"learning_minutes",5))); duration.currentIndexChanged.connect(lambda:self.set_learning_minutes(duration.currentData())); controls.addWidget(duration)
         refresh=QPushButton("获取最新"); refresh.setEnabled(not (self.feed_future and not self.feed_future.done())); refresh.setStyleSheet("background:#2563eb;color:white;border:0;font-weight:700"); refresh.clicked.connect(self.start_learning_feed); controls.addWidget(refresh); v.addLayout(controls)
         if self.feed_future and not self.feed_future.done():
-            loading=QLabel("正在读取最新 arXiv 论文并生成增量摘要…"); loading.setAlignment(Qt.AlignCenter); loading.setStyleSheet("color:#1d4ed8;background:white;padding:22px;border-radius:9px;font-weight:700"); v.addWidget(loading)
+            loading=QLabel("正在扫描论文、官方 Demo 和开源模型，并生成个性化摘要…"); loading.setAlignment(Qt.AlignCenter); loading.setStyleSheet("color:#1d4ed8;background:white;padding:22px;border-radius:9px;font-weight:700"); v.addWidget(loading)
         elif not self.feed_items:
             empty=QLabel("点击“获取最新”，生成第一份机器人前沿学习包"); empty.setAlignment(Qt.AlignCenter); empty.setStyleSheet("color:#64748b;background:white;padding:26px;border-radius:9px"); v.addWidget(empty)
         if self.feed_error:
-            warning=QLabel("AI 摘要暂不可用，已显示论文原始摘要 · "+self.feed_error[:100]); warning.setWordWrap(True); warning.setStyleSheet("color:#b45309;background:#fffbeb;padding:7px 9px;border-radius:6px;font-size:10px"); v.addWidget(warning)
-        saved=set(self.learning_state.get("saved",[]))
+            warning=QLabel("部分来源或 AI 摘要暂不可用，其他内容仍可正常阅读 · "+self.feed_error[:100]); warning.setWordWrap(True); warning.setStyleSheet("color:#b45309;background:#fffbeb;padding:7px 9px;border-radius:6px;font-size:10px"); v.addWidget(warning)
         for item in self.feed_items:
             card=QFrame(); card.setObjectName("learningCard"); card.setStyleSheet("QFrame#learningCard{background:white;border:1px solid #dbeafe;border-radius:9px}"); c=QVBoxLayout(card); c.setContentsMargins(12,10,12,10); c.setSpacing(6)
-            top=QHBoxLayout(); name=QLabel(item.get("title","未命名内容")); name.setWordWrap(True); name.setFont(QFont("Noto Sans CJK SC",13,QFont.Bold)); name.setStyleSheet("color:#0f172a"); top.addWidget(name,1); badge_text="▶ Demo 视频" if item.get("kind")=="video" else f"{item.get('seconds',45)} 秒读完"; seconds=QLabel(badge_text); seconds.setStyleSheet(f"color:{'#b91c1c' if item.get('kind')=='video' else '#0369a1'};background:{'#fee2e2' if item.get('kind')=='video' else '#e0f2fe'};padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700"); top.addWidget(seconds); c.addLayout(top)
-            meta=QLabel(f"{item.get('published','日期未知')}  ·  {item.get('source','')}  ·  "+" / ".join(item.get("tags",[])[:3])); meta.setStyleSheet("color:#64748b;font-size:10px"); c.addWidget(meta)
+            top=QHBoxLayout(); name=QLabel(item.get("title","未命名内容")); name.setWordWrap(True); name.setFont(QFont("Noto Sans CJK SC",13,QFont.Bold)); name.setStyleSheet("color:#0f172a"); top.addWidget(name,1); badge_text="▶ Demo 视频" if item.get("kind")=="video" else ("◆ 开源模型" if item.get("kind")=="model" else f"{item.get('seconds',45)} 秒读完"); seconds=QLabel(badge_text); seconds.setStyleSheet(f"color:{'#b91c1c' if item.get('kind')=='video' else '#0369a1'};background:{'#fee2e2' if item.get('kind')=='video' else '#e0f2fe'};padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700"); top.addWidget(seconds); c.addLayout(top)
+            read_label="  ·  已读" if item.get("read") else ""; meta=QLabel(f"{item.get('published','日期未知')}  ·  {item.get('source','')}  ·  推荐分 {item.get('score','--')}{read_label}  ·  "+" / ".join(item.get("tags",[])[:3])); meta.setStyleSheet("color:#94a3b8;font-size:10px" if item.get("read") else "color:#64748b;font-size:10px"); c.addWidget(meta)
+            reason=QLabel("推荐理由："+item.get("recommend_reason","机器人前沿探索")); reason.setWordWrap(True); reason.setStyleSheet("color:#047857;background:#ecfdf5;padding:4px 7px;border-radius:5px;font-size:10px"); c.addWidget(reason)
             summary=QLabel("解决什么："+item.get("summary","")); summary.setWordWrap(True); summary.setStyleSheet("color:#1e293b;font-size:12px;font-weight:600"); c.addWidget(summary)
             delta=QLabel("相对已有工作："+item.get("delta","")); delta.setWordWrap(True); delta.setStyleSheet("color:#4338ca;font-size:11px"); c.addWidget(delta)
             why=QLabel("为什么值得看："+item.get("why","")); why.setWordWrap(True); why.setStyleSheet("color:#475569;font-size:11px"); c.addWidget(why)
-            actions=QHBoxLayout(); actions.addStretch(); original=QPushButton("播放视频" if item.get("kind")=="video" else "查看原文"); original.setStyleSheet("background:#dc2626;color:white;border:0" if item.get("kind")=="video" else ""); original.clicked.connect(lambda _,u=item.get("url",""):self.open_learning_url(u)); actions.addWidget(original); mark=QPushButton("已收藏" if item.get("url") in saved else "收藏深读"); mark.setStyleSheet("background:#ede9fe;color:#6d28d9;border:0" if item.get("url") in saved else ""); mark.clicked.connect(lambda _,u=item.get("url",""):self.toggle_learning_saved(u)); actions.addWidget(mark); c.addLayout(actions); v.addWidget(card)
+            actions=QHBoxLayout(); actions.addStretch(); original=QPushButton("播放视频" if item.get("kind")=="video" else ("打开模型" if item.get("kind")=="model" else "查看原文")); original.setStyleSheet("background:#dc2626;color:white;border:0" if item.get("kind")=="video" else ""); original.clicked.connect(lambda _,u=item.get("url",""):self.open_learning_url(u)); actions.addWidget(original); mark=QPushButton("已收藏" if item.get("saved") else "收藏深读"); mark.setStyleSheet("background:#ede9fe;color:#6d28d9;border:0" if item.get("saved") else ""); mark.clicked.connect(lambda _,u=item.get("url",""):self.toggle_learning_saved(u)); actions.addWidget(mark); c.addLayout(actions); v.addWidget(card)
+        stats=self.feed_stats; storage=QLabel(f"有界存储：{stats.get('count',0)}/{stats.get('limit',1000)} 条 · 收藏 {stats.get('saved',0)} · 占用 {stats.get('bytes',0)/1024/1024:.1f} MB · 普通记录60天自动清理"); storage.setAlignment(Qt.AlignCenter); storage.setStyleSheet("color:#64748b;font-size:10px;padding:6px"); v.addWidget(storage)
         self.box.addWidget(panel)
     def set_learning_minutes(self,value):self.learning_minutes=int(value or 5)
     def start_learning_feed(self):
         if self.feed_future and not self.feed_future.done():return
-        count={3:4,5:6,10:9,20:12}.get(getattr(self,"learning_minutes",5),6); self.feed_error=""; self.feed_future=self.feed_executor.submit(build_learning_feed,count); self.refresh(); QTimer.singleShot(250,self.poll_learning_feed)
+        context_parts=[]
+        for window in self.windows:
+            context_parts.append(window.get("folder","")+" "+window.get("path",""))
+            if window.get("status")=="正在运行":
+                conversations,_=project_conversations(window.get("path",""),2); context_parts.extend(x.get("title","") for x in conversations)
+        self.learning_context=context_profile(" ".join(context_parts)); count={3:4,5:6,10:9,20:12}.get(getattr(self,"learning_minutes",5),6); self.feed_error=""; self.feed_future=self.feed_executor.submit(build_learning_feed_v2,count,self.learning_context); self.refresh(); QTimer.singleShot(250,self.poll_learning_feed)
     def poll_learning_feed(self):
         if not self.feed_future:return
         if not self.feed_future.done():QTimer.singleShot(250,self.poll_learning_feed); return
-        try:self.feed_items,self.feed_error=self.feed_future.result()
+        try:self.feed_items,self.feed_error,self.feed_stats=self.feed_future.result()
         except Exception as exc:self.feed_error=str(exc)
         self.feed_future=None
         if self.view_mode=="learn":self.refresh()
     def open_learning_url(self,url):
-        if url:subprocess.Popen(["xdg-open",url],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        if url:
+            self.feed_store.mark_read(url)
+            for item in self.feed_items:
+                if item.get("url")==url:item["read"]=True
+            subprocess.Popen(["xdg-open",url],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); self.refresh()
     def toggle_learning_saved(self,url):
-        saved=self.learning_state.setdefault("saved",[])
-        if url in saved:saved.remove(url)
-        elif url:saved.append(url)
-        LEARNING_STATE.write_text(json.dumps(self.learning_state,ensure_ascii=False,indent=2),encoding="utf-8"); self.refresh()
+        if url:self.feed_store.toggle_saved(url)
+        self.feed_items=self.feed_store.recent(12); self.feed_stats=self.feed_store.stats(); self.refresh()
     def todo_panel(self):
         today=datetime.now().strftime("%Y-%m-%d"); visible=[t for t in self.todos if not t.get("done") or t.get("done_date")==today]
         priority_order={"高":0,"中":1,"低":2}; visible.sort(key=lambda t:(bool(t.get("done")),priority_order.get(t.get("priority","中"),1),t.get("created_at","")))

@@ -9,6 +9,7 @@ seen_sessions.json
 events.jsonl
 learning_feed.json
 learning_state.json
+learning.db*
 
 # Generated extension packages and accidental window dumps
 *.vsix
