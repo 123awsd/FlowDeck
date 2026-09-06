@@ -12,6 +12,7 @@ from .curriculum import CurriculumLibrary, CurriculumStore, PATH_LABELS, STATE_L
 from .lessons import LessonChatStore, LessonStore, ask_lesson_tutor, generate_lesson
 from .learning_feed import PREFERENCES_PATH, Store as LearningStore, build_feed as build_learning_feed_v2, context_profile
 from .paths import ASSETS_DIR, DATA_DIR, PROJECT_ROOT
+from .project_ideas import ProjectIdeaStore
 from .system_monitor import SystemMonitor
 from .vocabulary import VocabularyLibrary, VocabularyStore
 try:
@@ -390,10 +391,39 @@ class LessonChatDialog(QDialog):
         if self.future and not self.future.done():self._close_after_answer=True; self.hide(); event.ignore(); return
         super().closeEvent(event)
 
+class ProjectIdeasDialog(QDialog):
+    def __init__(self, store, project, parent=None):
+        super().__init__(parent); self.store=store; self.project=project
+        self.setWindowTitle("项目灵感 · "+project.get("folder","未命名项目")); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setMinimumSize(500,430); self.resize(560,560)
+        self.setStyleSheet("QDialog{background:#f8fafc} QLabel{font-family:'Noto Sans CJK SC';color:#172033} QPushButton{font-family:'Noto Sans CJK SC';padding:7px 11px;background:white;border:1px solid #dbe3ed;border-radius:7px} QPushButton:hover{background:#eef2ff;border-color:#a5b4fc} QPlainTextEdit{font-family:'Noto Sans CJK SC';font-size:13px;color:#172033;background:white;border:1px solid #cbd5e1;border-radius:9px;padding:8px}")
+        outer=QVBoxLayout(self); outer.setContentsMargins(16,14,16,16); outer.setSpacing(10)
+        head=QHBoxLayout(); titles=QVBoxLayout(); titles.setSpacing(1); title=QLabel("灵感备忘"); title.setStyleSheet("font-size:18px;font-weight:700;color:#312e81"); titles.addWidget(title); subtitle=QLabel(project.get("folder","未命名项目")+" · 来不及实现的想法先放在这里"); subtitle.setStyleSheet("color:#64748b;font-size:10px"); titles.addWidget(subtitle); head.addLayout(titles); head.addStretch(); self.stats=QLabel(); self.stats.setStyleSheet("color:#6d28d9;background:#ede9fe;padding:4px 8px;border-radius:6px;font-size:10px;font-weight:700"); head.addWidget(self.stats); outer.addLayout(head)
+        capture=QFrame(); capture.setObjectName("ideaCapture"); capture.setStyleSheet("QFrame#ideaCapture{background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px}"); capture_layout=QVBoxLayout(capture); capture_layout.setContentsMargins(10,9,10,10); capture_layout.setSpacing(7); self.input=QPlainTextEdit(); self.input.setPlaceholderText("记下一个想法、实验方向或以后要验证的问题……"); self.input.setFixedHeight(72); capture_layout.addWidget(self.input); capture_actions=QHBoxLayout(); hint=QLabel("只保存在本机，并绑定到这个项目"); hint.setStyleSheet("color:#7c3aed;font-size:9px"); capture_actions.addWidget(hint); capture_actions.addStretch(); add=QPushButton("＋ 记录灵感"); add.setStyleSheet("background:#6d28d9;color:white;border:0;font-weight:700"); add.clicked.connect(self.add_idea); capture_actions.addWidget(add); capture_layout.addLayout(capture_actions); outer.addWidget(capture)
+        self.scroll=QScrollArea(); self.scroll.setWidgetResizable(True); self.scroll.setFrameShape(QFrame.NoFrame); self.container=QWidget(); self.list_layout=QVBoxLayout(self.container); self.list_layout.setContentsMargins(0,0,0,0); self.list_layout.setSpacing(7); self.scroll.setWidget(self.container); outer.addWidget(self.scroll,1); self.render()
+    def render(self):
+        while self.list_layout.count():
+            item=self.list_layout.takeAt(0); widget=item.widget()
+            if widget:widget.deleteLater()
+        rows=self.store.list(self.project.get("path","")); open_count=sum(not row.get("done") for row in rows); self.stats.setText(f"{open_count} 条待处理")
+        if not rows:
+            empty=QLabel("还没有灵感记录\n想到什么就先放进来，不必现在实现"); empty.setAlignment(Qt.AlignCenter); empty.setStyleSheet("color:#94a3b8;background:white;padding:28px;border-radius:9px"); self.list_layout.addWidget(empty)
+        for idea in rows:
+            card=QFrame(); card.setObjectName("ideaCard"); card.setStyleSheet("QFrame#ideaCard{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px}" if idea.get("done") else "QFrame#ideaCard{background:white;border:1px solid #c4b5fd;border-left:3px solid #8b5cf6;border-radius:8px}"); line=QHBoxLayout(card); line.setContentsMargins(9,8,7,8); line.setSpacing(7); check=QCheckBox(); check.setChecked(bool(idea.get("done"))); check.setToolTip("标记为已处理"); check.stateChanged.connect(lambda state,idea_id=idea["id"]:self.toggle_idea(idea_id,state)); line.addWidget(check); text=QLabel(idea.get("text","")); text.setWordWrap(True); text.setTextInteractionFlags(Qt.TextSelectableByMouse); text.setStyleSheet("color:#94a3b8;text-decoration:line-through" if idea.get("done") else "color:#1e293b;font-size:12px;font-weight:600"); line.addWidget(text,1); edit=QPushButton("编辑"); edit.setFixedHeight(30); edit.clicked.connect(lambda _,row=idea:self.edit_idea(row)); line.addWidget(edit); remove=QPushButton("×"); remove.setFixedSize(29,29); remove.setToolTip("删除灵感"); remove.setStyleSheet("QPushButton{padding:0;border:0;background:transparent;color:#94a3b8;font-size:17px} QPushButton:hover{background:#fee2e2;color:#dc2626}"); remove.clicked.connect(lambda _,row=idea:self.delete_idea(row)); line.addWidget(remove); self.list_layout.addWidget(card)
+        self.list_layout.addStretch()
+    def add_idea(self):
+        if self.store.add(self.project.get("path",""),self.project.get("folder","未命名项目"),self.input.toPlainText()):self.input.clear(); self.render()
+    def toggle_idea(self,idea_id,state):self.store.toggle(idea_id,bool(state)); self.render()
+    def edit_idea(self,idea):
+        text,accepted=QInputDialog.getMultiLineText(self,"编辑灵感","内容",idea.get("text",""))
+        if accepted and self.store.update(idea["id"],text):self.render()
+    def delete_idea(self,idea):
+        if QMessageBox.question(self,"删除灵感","确定删除这条灵感吗？",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)==QMessageBox.Yes:self.store.delete(idea["id"]); self.render()
+
+
 class App(QWidget):
     def __init__(self):
         super().__init__()
-        self.tasks=self.load(); self.todos=self.load_todos(); self.view_mode="monitor"; self.windows=[]; self.expanded=False
+        self.tasks=self.load(); self.todos=self.load_todos(); self.idea_store=ProjectIdeaStore(); self.view_mode="monitor"; self.windows=[]; self.expanded=False
         self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}
         self.feed_error=""; self.feed_future=None; self.feed_executor=ThreadPoolExecutor(max_workers=1)
         self.feed_store=LearningStore(); self.feed_display_limit=6; self.feed_items=self.feed_store.recent(self.feed_display_limit); self.feed_stats=self.feed_store.stats()
@@ -491,7 +521,8 @@ class App(QWidget):
         active_todos=[t for t in self.todos if not t.get("done")]; done_today=[t for t in self.todos if t.get("done") and t.get("done_date")==datetime.now().strftime("%Y-%m-%d")]
         if self.view_mode=="monitor":
             notice=f" · {unread} 待查看" if unread else ""; self.summary.setText(f"{self.running_count} 正在运行 · {self.done_count} 已完成{notice}")
-        elif self.view_mode=="todo":self.summary.setText(f"{len(active_todos)} 项待办 · 今天完成 {len(done_today)}")
+        elif self.view_mode=="todo":
+            current=next((todo for todo in self.todos if todo.get("active") and not todo.get("done")),None); self.summary.setText(("正在做 · "+current.get("text","")[:20]) if current else f"{len(active_todos)} 项待办 · 今天完成 {len(done_today)}")
         elif self.view_mode=="learn":
             bundle=self.curriculum_library.get(self.curriculum_domain_id) if self.learning_mode=="curriculum" else None
             if bundle:
@@ -576,7 +607,11 @@ class App(QWidget):
             card=QFrame(); card.setObjectName("windowCard"); card.setStyleSheet("QFrame#windowCard{background:white;border:1px solid #dbeafe;border-radius:8px}"); h=QHBoxLayout(card); h.setContentsMargins(12,10,10,10)
             dot=QLabel("●" if unread else ("●" if state=="正在运行" else "○")); dot.setStyleSheet(f"color:{'#ef4444' if unread else ('#2563eb' if state=='正在运行' else '#94a3b8')};font-size:18px"); h.addWidget(dot)
             info=QVBoxLayout(); name=QLabel(w["folder"]); name.setFont(QFont("Noto Sans CJK SC",14,QFont.Bold)); info.addWidget(name)
-            meta=QHBoxLayout(); account=QLabel(w["account"]); account.setStyleSheet("color:#4338ca;background:#eef2ff;padding:3px 8px;border-radius:5px;font-size:12px"); meta.addWidget(account); status=QLabel("待查看" if unread else state); status.setStyleSheet(f"color:{'#b91c1c' if unread else '#475569'};background:{'#fee2e2' if unread else '#f1f5f9'};padding:3px 8px;border-radius:5px;font-weight:{'700' if unread else '500'};font-size:12px"); meta.addWidget(status); meta.addStretch(); info.addLayout(meta); h.addLayout(info,1)
+            meta=QHBoxLayout(); account=QLabel(w["account"]); account.setStyleSheet("color:#4338ca;background:#eef2ff;padding:3px 8px;border-radius:5px;font-size:12px"); meta.addWidget(account); status=QLabel("待查看" if unread else state); status.setStyleSheet(f"color:{'#b91c1c' if unread else '#475569'};background:{'#fee2e2' if unread else '#f1f5f9'};padding:3px 8px;border-radius:5px;font-weight:{'700' if unread else '500'};font-size:12px"); meta.addWidget(status); meta.addStretch(); info.addLayout(meta)
+            open_ideas=self.idea_store.list(w["path"],include_done=False)
+            if open_ideas:
+                preview=QLabel("✦  "+open_ideas[0].get("text","")[:72]); preview.setToolTip(open_ideas[0].get("text","")); preview.setStyleSheet("color:#7c3aed;font-size:10px"); info.addWidget(preview)
+            h.addLayout(info,1)
             conversations,total_conversations=project_conversations(w["path"])
             chats=QToolButton(); chats.setText(f"对话 {total_conversations}  ▾"); chats.setPopupMode(QToolButton.InstantPopup); chats.setCursor(Qt.PointingHandCursor); chats.setToolTip("只显示属于这个项目的 Codex 对话"); chats.setStyleSheet("QToolButton{padding:7px 11px;background:#f5f3ff;color:#6d28d9;border:1px solid #c4b5fd;border-radius:7px;font-weight:700} QToolButton:hover{background:#ede9fe} QToolButton::menu-indicator{image:none}")
             chat_menu=QMenu(chats); caption=chat_menu.addAction(f"此项目最近对话 · 共 {total_conversations} 条"); caption.setEnabled(False)
@@ -598,9 +633,12 @@ class App(QWidget):
                 remaining=(profile.get("limits",{}).get("primary") or {}).get("remainingPercent"); action=menu.addAction(("✓  " if profile.get("name")==selected_name else "    ")+f"{profile.get('name','未命名')}    {remaining if remaining is not None else '--'}%"); action.triggered.connect(lambda _,x=w,p=profile:self.select_account(x,p))
             if not available:disabled=menu.addAction("暂无可用额度账号"); disabled.setEnabled(False)
             selector.setMenu(menu); selector.setToolTip("先选择账号，再点聚焦应用切换"); h.addWidget(selector)
+            ideas=QPushButton(f"灵感 {len(open_ideas)}" if open_ideas else "记灵感"); ideas.setToolTip("记录和管理这个项目暂未实现的想法"); ideas.setStyleSheet("background:#f5f3ff;color:#6d28d9;border:1px solid #ddd6fe"); ideas.clicked.connect(lambda _,x=w:self.open_project_ideas(x)); h.addWidget(ideas)
             create=QPushButton("加待办"); create.setToolTip("把这个项目加入今日待办"); create.clicked.connect(lambda _,x=w:self.prefill_todo(x)); h.addWidget(create)
             focus=QPushButton("切换并聚焦" if pending else ("查看" if unread else "聚焦")); focus.setStyleSheet("background:#ea580c;color:white;border:0" if pending else ("background:#dc2626;color:white;border:0" if unread else "background:#2563eb;color:white;border:0")); focus.clicked.connect(lambda _,x=w:self.focus(x["id"])); h.addWidget(focus); v.addWidget(card)
         self.box.addWidget(p)
+    def open_project_ideas(self,window):
+        dialog=ProjectIdeasDialog(self.idea_store,window,self); dialog.exec() if hasattr(dialog,"exec") else dialog.exec_(); self.refresh()
     def account_panel(self):
         rows=profiles(); p=QFrame(); p.setObjectName("accountPanel"); p.setStyleSheet("QFrame#accountPanel{background:#f7fcfa;border:1px solid #dbeee7;border-radius:11px} QLabel{background:transparent}"); v=QVBoxLayout(p); v.setContentsMargins(13,10,13,12); v.setSpacing(7); head=QHBoxLayout(); heading=QLabel("账号额度"); heading.setFont(QFont("Noto Sans CJK SC",14,QFont.Bold)); heading.setStyleSheet("color:#0f172a"); head.addWidget(heading); subtitle=QLabel("自动读取 Codex Switch"); subtitle.setStyleSheet("color:#64748b;font-size:10px"); head.addWidget(subtitle); head.addStretch(); count=QLabel(f"{len(rows)} 个账号"); count.setStyleSheet("color:#047857;background:#ecfdf5;padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700"); head.addWidget(count); v.addLayout(head); h=QHBoxLayout(); h.setSpacing(7)
         for profile in rows:
@@ -980,10 +1018,10 @@ class App(QWidget):
         self.feed_store.feedback(url,action); self.feed_items=self.feed_store.recent(self.feed_display_limit); self.feed_stats=self.feed_store.stats(); self.refresh()
     def todo_panel(self):
         today=datetime.now().strftime("%Y-%m-%d"); visible=[t for t in self.todos if not t.get("done") or t.get("done_date")==today]
-        priority_order={"高":0,"中":1,"低":2}; visible.sort(key=lambda t:(bool(t.get("done")),priority_order.get(t.get("priority","中"),1),t.get("created_at","")))
+        priority_order={"高":0,"中":1,"低":2}; visible.sort(key=lambda t:(not bool(t.get("active") and not t.get("done")),bool(t.get("done")),priority_order.get(t.get("priority","中"),1),t.get("created_at","")))
         panel=QFrame(); panel.setObjectName("todoPanel"); panel.setStyleSheet("QFrame#todoPanel{background:#f5f3ff;border:1px solid #ddd6fe;border-radius:11px} QLabel{background:transparent}"); layout=QVBoxLayout(panel); layout.setContentsMargins(14,13,14,14); layout.setSpacing(9)
         head=QHBoxLayout(); title=QLabel("今日待办"); title.setFont(QFont("Noto Sans CJK SC",16,QFont.Bold)); title.setStyleSheet("color:#312e81"); head.addWidget(title); head.addStretch(); completed=sum(t.get("done") for t in visible); progress=QLabel(f"已完成 {completed}/{len(visible)}"); progress.setStyleSheet("color:#6d28d9;background:#ede9fe;padding:4px 9px;border-radius:6px;font-weight:700"); head.addWidget(progress); layout.addLayout(head)
-        hint=QLabel("未完成事项会自动保留到第二天"); hint.setStyleSheet("color:#7c3aed;font-size:11px"); layout.addWidget(hint)
+        active_todo=next((todo for todo in visible if todo.get("active") and not todo.get("done")),None); hint=QLabel("当前只聚焦一件事 · 未完成事项会自动保留到第二天" if active_todo else "点击“开始”标记当前正在做的事 · 未完成事项会自动保留到第二天"); hint.setStyleSheet("color:#7c3aed;font-size:11px"); layout.addWidget(hint)
         entry=QFrame(); entry.setStyleSheet("background:white;border:1px solid #ddd6fe;border-radius:9px"); row=QHBoxLayout(entry); row.setContentsMargins(9,8,9,8)
         self.todo_input=QLineEdit(); self.todo_input.setPlaceholderText("输入今天要做的事，按回车添加……"); self.todo_input.returnPressed.connect(self.add_todo); row.addWidget(self.todo_input,1)
         self.todo_priority=QComboBox(); self.todo_priority.addItems(["中","高","低"]); self.todo_priority.setToolTip("优先级"); row.addWidget(self.todo_priority)
@@ -994,12 +1032,17 @@ class App(QWidget):
             empty=QLabel("今天还没有待办，先记下最重要的一件事吧"); empty.setAlignment(Qt.AlignCenter); empty.setStyleSheet("color:#94a3b8;background:white;padding:28px;border-radius:9px"); layout.addWidget(empty)
         colors={"高":("#dc2626","#fee2e2"),"中":("#d97706","#fef3c7"),"低":("#059669","#d1fae5")}
         for todo in visible:
-            card=QFrame(); card.setObjectName("todoCard"); card.setStyleSheet("QFrame#todoCard{background:white;border:1px solid #e9d5ff;border-radius:8px}"); line=QHBoxLayout(card); line.setContentsMargins(11,8,8,8)
+            active=bool(todo.get("active") and not todo.get("done")); card=QFrame(); card.setObjectName("todoCard"); card.setStyleSheet("QFrame#todoCard{background:#eef2ff;border:2px solid #6366f1;border-radius:9px}" if active else "QFrame#todoCard{background:white;border:1px solid #e9d5ff;border-radius:8px}"); line=QHBoxLayout(card); line.setContentsMargins(10 if active else 11,8,8,8)
             check=QCheckBox(); check.setChecked(bool(todo.get("done"))); check.setCursor(Qt.PointingHandCursor); check.stateChanged.connect(lambda state,t=todo:self.toggle_todo(t,state)); line.addWidget(check)
+            if active:
+                active_badge=QLabel("● 正在做"); active_badge.setStyleSheet("color:#4338ca;background:#ddd6fe;padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700"); line.addWidget(active_badge)
             text=QLabel(todo.get("text","")); text.setWordWrap(True); text.setStyleSheet("color:#94a3b8;text-decoration:line-through" if todo.get("done") else "color:#1e293b;font-size:13px;font-weight:600"); line.addWidget(text,1)
             if todo.get("project"):
                 project=QLabel(todo["project"]); project.setStyleSheet("color:#4338ca;background:#eef2ff;padding:3px 7px;border-radius:5px;font-size:10px"); line.addWidget(project)
             priority=todo.get("priority","中"); fg,bg=colors.get(priority,colors["中"]); badge=QLabel(priority); badge.setStyleSheet(f"color:{fg};background:{bg};padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700"); line.addWidget(badge)
+            if not todo.get("done"):
+                activate=QPushButton("暂停" if active else "开始"); activate.setToolTip("取消当前聚焦" if active else "设为当前正在做，并自动置顶"); activate.setStyleSheet("background:#4f46e5;color:white;border:0;font-weight:700" if active else "background:#eef2ff;color:#4338ca;border:1px solid #c4b5fd"); activate.clicked.connect(lambda _,t=todo:self.toggle_todo_active(t)); line.addWidget(activate)
+            edit=QPushButton("编辑"); edit.setToolTip("修改内容、优先级和绑定项目"); edit.clicked.connect(lambda _,t=todo:self.edit_todo(t)); line.addWidget(edit)
             remove=QPushButton("×"); remove.setFixedSize(28,28); remove.setToolTip("删除待办"); remove.setStyleSheet("QPushButton{padding:0;border:0;background:transparent;color:#94a3b8;font-size:17px} QPushButton:hover{background:#fee2e2;color:#dc2626}"); remove.clicked.connect(lambda _,t=todo:self.delete_todo(t)); line.addWidget(remove); layout.addWidget(card)
         self.box.addWidget(panel)
     def add_todo(self):
@@ -1008,7 +1051,21 @@ class App(QWidget):
         project_path=self.todo_project.currentData() or ""; project=self.todo_project.currentText() if project_path else ""
         self.todos.append({"id":uuid.uuid4().hex,"text":text,"priority":self.todo_priority.currentText(),"project":project,"project_path":project_path,"done":False,"created_at":datetime.now().isoformat(timespec="seconds")}); self.save_todos(); self.refresh()
     def toggle_todo(self,todo,state):
-        todo["done"]=bool(state); todo["done_date"]=datetime.now().strftime("%Y-%m-%d") if state else ""; self.save_todos(); self.refresh()
+        todo["done"]=bool(state); todo["done_date"]=datetime.now().strftime("%Y-%m-%d") if state else ""; todo["active"]=False if state else bool(todo.get("active")); self.save_todos(); self.refresh()
+    def toggle_todo_active(self,todo):
+        activating=not bool(todo.get("active"))
+        for item in self.todos:item["active"]=bool(activating and item is todo and not item.get("done"))
+        self.save_todos(); self.refresh()
+    def edit_todo(self,todo):
+        dialog=QDialog(self); dialog.setWindowTitle("编辑待办"); dialog.setWindowFlag(Qt.WindowStaysOnTopHint,True); dialog.setMinimumWidth(440); dialog.setStyleSheet("QDialog{background:#f8fafc} QLabel{font-family:'Noto Sans CJK SC';color:#475569} QLineEdit,QComboBox{font-family:'Noto Sans CJK SC';padding:8px;background:white;border:1px solid #cbd5e1;border-radius:7px} QPushButton{font-family:'Noto Sans CJK SC';padding:8px 14px;background:white;border:1px solid #dbe3ed;border-radius:7px}")
+        form=QVBoxLayout(dialog); form.setContentsMargins(16,14,16,16); form.setSpacing(8); heading=QLabel("修改待办"); heading.setStyleSheet("color:#312e81;font-size:17px;font-weight:700"); form.addWidget(heading); form.addWidget(QLabel("内容")); content=QLineEdit(todo.get("text","")); content.selectAll(); form.addWidget(content); options=QHBoxLayout(); priority_box=QComboBox(); priority_box.addItems(["高","中","低"]); priority_box.setCurrentText(todo.get("priority","中")); options.addWidget(priority_box); project_box=QComboBox(); project_box.addItem("不绑定项目",""); known_paths=set()
+        if todo.get("project_path"):project_box.addItem(todo.get("project") or Path(todo["project_path"]).name,todo["project_path"]); known_paths.add(todo["project_path"])
+        for window in self.windows:
+            if window["path"] not in known_paths:project_box.addItem(window["folder"],window["path"]); known_paths.add(window["path"])
+        project_box.setCurrentIndex(max(0,project_box.findData(todo.get("project_path","") or ""))); options.addWidget(project_box,1); form.addLayout(options); actions=QHBoxLayout(); actions.addStretch(); cancel=QPushButton("取消"); cancel.clicked.connect(dialog.reject); actions.addWidget(cancel); save=QPushButton("保存修改"); save.setStyleSheet("background:#4f46e5;color:white;border:0;font-weight:700"); save.clicked.connect(dialog.accept); actions.addWidget(save); form.addLayout(actions); content.returnPressed.connect(dialog.accept); content.setFocus()
+        result=dialog.exec() if hasattr(dialog,"exec") else dialog.exec_()
+        if result and content.text().strip():
+            todo["text"]=content.text().strip(); todo["priority"]=priority_box.currentText(); todo["project_path"]=project_box.currentData() or ""; todo["project"]=project_box.currentText() if todo["project_path"] else ""; todo["updated_at"]=datetime.now().isoformat(timespec="seconds"); self.save_todos(); self.refresh()
     def delete_todo(self,todo):
         if todo in self.todos:self.todos.remove(todo); self.save_todos(); self.refresh()
     def prefill_todo(self,w):

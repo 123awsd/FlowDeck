@@ -1,6 +1,6 @@
 # 项目长期记忆
 
-最后更新：2026-09-06
+最后更新：2026-09-07
 
 这份文件是项目的稳定上下文和专题文档索引。它解决“更换 Codex 对话或几个月后继续开发时，不能只依赖聊天记忆”的问题。
 
@@ -17,7 +17,8 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 | 悬浮窗与导航 | 已实现 | 置顶悬浮球、展开/收起、四个主页面 | `src/codex_control_tower/ui.py` |
 | VS Code 窗口监控 | 已实现 | 自动发现本地和 SSH 窗口、项目、运行/完成状态、待查看提醒和聚焦 | `src/codex_control_tower/ui.py`、`extensions/vscode-bridge/`、`extensions/remote-monitor/` |
 | 账号与额度 | 已实现 | 读取 Codex Switch 账号和额度周期，过滤无额度账号，切换后聚焦目标窗口 | `src/codex_control_tower/ui.py`、`extensions/vscode-bridge/` |
-| 今日待办 | 已实现 | 本地待办、优先级、当日完成进度、系统中文输入法 | `src/codex_control_tower/ui.py` |
+| 今日待办 | 已实现 | 本地待办、单一当前焦点、编辑、优先级、当日完成进度、系统中文输入法 | `src/codex_control_tower/ui.py` |
+| 项目灵感 | 已实现 | 按 VS Code 项目记录、预览、编辑和处理暂未实现的想法 | `src/codex_control_tower/project_ideas.py`、`src/codex_control_tower/ui.py` |
 | 系统监控 | 已实现 | CPU、内存、Swap、GPU/显存、网络、磁盘和高占用进程 | `src/codex_control_tower/system_monitor.py`、`src/codex_control_tower/ui.py` |
 | 前沿追踪 | 已实现 | 具身智能宽召回、质量门槛、五通道推荐、视频、反馈和有界存储 | `src/codex_control_tower/learning_feed.py`、`config/learning_preferences.json`、`src/codex_control_tower/ui.py` |
 | 系统学习 | 已实现 | VLA reviewed draft、三条路线、审查门禁与实际微课正文；关键课内置，其余按需生成并缓存 | `src/codex_control_tower/curriculum.py`、`src/codex_control_tower/lessons.py`、`learning/domains/vla/` |
@@ -37,6 +38,13 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 - 每个 VS Code 窗口应自动识别其文件夹；本地与 Remote SSH 都属于正常使用场景。
 - 当前已经聚焦的窗口不应继续显示为“待查看”。
 - 账号切换采用“选择目标账号 → 切换并聚焦”，并过滤明确没有额度的账号。
+
+### 工作与灵感
+
+- 今日待办同时最多激活一项；激活项置顶并明确标记“正在做”，完成时自动取消激活。
+- 已创建待办允许修改内容、优先级和绑定项目。
+- 项目灵感与今日待办分离：前者保存未来可能实现的项目想法，后者表示近期可执行事项。
+- 灵感按项目路径隔离，只保存在本机，总量上限为 1000 条。
 
 ### 系统监控
 
@@ -62,11 +70,11 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 - 猫猫 PNG 和三套内置词库经用户确认来自其自有项目 `123awsd/win-floating-vocab`，允许在本项目复用；不引入原项目的第二套窗口运行时。
 - 单词页支持仅在该页面生效的键盘操作；朗读优先复用 `Alt+Q` 的本机 Piper 服务与声音，失败时依次退回在线 Edge 和 eSpeak，临时音频不累积。
 
-完整设计见 [领域学习系统](LEARNING_SYSTEM.md) 和 [单词闪卡](VOCABULARY.md)。
+完整设计见 [工作与灵感管理](WORK_MANAGEMENT.md)、[领域学习系统](LEARNING_SYSTEM.md) 和 [单词闪卡](VOCABULARY.md)。
 
 ## 数据与增长边界
 
-- `data/tasks.json`、`data/daily_todos.json`、`data/seen_sessions.json`、`data/learning.db` 等个人运行状态不进入 Git。
+- `data/tasks.json`、`data/daily_todos.json`、`data/project_ideas.json`、`data/seen_sessions.json`、`data/learning.db` 等个人运行状态不进入 Git。
 - 前沿内容普通记录保留 60 天且总数受限；收藏长期保留；热度快照保留 180 天。
 - 系统学习的 Curriculum、来源和人工审查结果属于长期知识资产，可版本管理。
 - 学习进度、反馈、薄弱点和缓存属于个人运行数据，不进入 Git。
@@ -87,3 +95,4 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 - 2026-09-06：将课程节点升级为实际微课，并加入按知识点隔离、可连续追问的 DeepSeek 学习助手；微课和问答均使用有界本地缓存。
 - 2026-09-07：增加“单词闪卡”，经用户确认复用其自有 `win-floating-vocab` 项目的猫猫 PNG 和三套词库，并以主动回忆、间隔复习方式重写交互。
 - 2026-09-07：缩小单词页猫猫并重做词库菜单；增加左右切词、翻面、朗读和三档评价快捷键；朗读复用 `Alt+Q` 的本机 Piper 服务。
+- 2026-09-07：今日待办增加单一“正在做”焦点与编辑；任务监控增加按项目隔离、容量有界的灵感备忘。
