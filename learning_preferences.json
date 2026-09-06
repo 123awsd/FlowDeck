@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "scope": {
+    "domain": "embodied_ai",
+    "label": "具身智能前沿",
+    "required_signals": [
+      "robot",
+      "embodied",
+      "manipulation",
+      "navigation",
+      "vision-language-action",
+      "world model",
+      "robot learning"
+    ],
+    "soft_exclude": [
+      "纯机械结构",
+      "传统控制",
+      "普通行业应用介绍",
+      "医疗机器人介绍"
+    ],
+    "hard_exclude": []
+  },
+  "interests": {
+    "VLA": {
+      "label": "视觉-语言-动作模型",
+      "aliases": ["vla", "vision language action", "action model", "generalist policy", "robot foundation model"],
+      "interest": {"value": 0.95, "confidence": 1.0, "source": "user"},
+      "knowledge": {"value": 0.85, "confidence": 0.9, "source": "user"}
+    },
+    "robot_learning": {
+      "label": "机器人学习",
+      "aliases": ["robot learning", "imitation learning", "reinforcement learning", "policy learning", "behavior cloning"],
+      "interest": {"value": 0.92, "confidence": 0.9, "source": "user"},
+      "knowledge": {"value": 0.75, "confidence": 0.75, "source": "user"}
+    },
+    "world_models": {
+      "label": "世界模型",
+      "aliases": ["world model", "world action model", "video prediction", "action-conditioned video", "future prediction"],
+      "interest": {"value": 0.88, "confidence": 0.9, "source": "user"},
+      "knowledge": {"value": 0.55, "confidence": 0.65, "source": "user"}
+    },
+    "VLN": {
+      "label": "视觉语言导航",
+      "aliases": ["vln", "vision language navigation", "embodied navigation", "language navigation", "spatial navigation"],
+      "interest": {"value": 0.82, "confidence": 0.9, "source": "user"},
+      "knowledge": {"value": 0.70, "confidence": 0.75, "source": "user"}
+    },
+    "embodied_reasoning": {
+      "label": "具身推理",
+      "aliases": ["embodied reasoning", "spatial reasoning", "physical reasoning", "robot planning", "agentic robotics"],
+      "interest": {"value": 0.85, "confidence": 0.85, "source": "user"},
+      "knowledge": {"value": 0.50, "confidence": 0.60, "source": "user"}
+    },
+    "cross_embodiment": {
+      "label": "跨本体与通用操作",
+      "aliases": ["cross embodiment", "cross-embodiment", "generalist robot", "dexterous manipulation", "humanoid manipulation"],
+      "interest": {"value": 0.88, "confidence": 0.85, "source": "user"},
+      "knowledge": {"value": 0.62, "confidence": 0.65, "source": "user"}
+    },
+    "robot_data": {
+      "label": "机器人数据与仿真",
+      "aliases": ["robot data", "synthetic data", "sim2real", "sim-to-real", "robot dataset", "data scaling"],
+      "interest": {"value": 0.76, "confidence": 0.75, "source": "user"},
+      "knowledge": {"value": 0.60, "confidence": 0.60, "source": "user"}
+    }
+  },
+  "recent_interests": {
+    "UAV": {
+      "aliases": ["uav", "drone", "aerial robot", "quadrotor"],
+      "weight": 0.65,
+      "created_at": "2026-09-06",
+      "expires_days": 30
+    },
+    "GRPO": {
+      "aliases": ["grpo", "reinforcement learning post-training", "policy post-training"],
+      "weight": 0.70,
+      "created_at": "2026-09-06",
+      "expires_days": 30
+    }
+  },
+  "reference_works": [
+    {"name": "pi0", "aliases": ["π0", "pi0", "pi zero", "pi0.5", "pi0.6"], "type": "model", "weight": 1.0},
+    {"name": "OpenVLA", "aliases": ["openvla", "openvla-oft"], "type": "model", "weight": 1.0},
+    {"name": "GR00T", "aliases": ["gr00t", "groot n1", "isaac gr00t"], "type": "model", "weight": 0.95},
+    {"name": "Gemini Robotics", "aliases": ["gemini robotics"], "type": "model", "weight": 0.95},
+    {"name": "Octo", "aliases": ["octo robot", "octo model"], "type": "model", "weight": 0.85},
+    {"name": "LIBERO", "aliases": ["libero benchmark", "libero"], "type": "benchmark", "weight": 0.75},
+    {"name": "LeRobot", "aliases": ["lerobot"], "type": "codebase", "weight": 0.80},
+    {"name": "Physical Intelligence", "aliases": ["physical intelligence", "pi.website"], "type": "organization", "weight": 1.0}
+  ],
+  "feed_mix": {
+    "core": 0.40,
+    "adjacent": 0.15,
+    "major": 0.20,
+    "emerging": 0.15,
+    "serendipity": 0.10
+  },
+  "presentation": {
+    "session_items": 6,
+    "video_preference": 0.55,
+    "minimum_qualified_videos": 2
+  },
+  "discovery": {
+    "interest_can_filter_candidates": false,
+    "allow_unknown_topics": true,
+    "major_can_override_interest": true,
+    "prefer_empty_over_filler": true,
+    "minimum_quality": 0.65,
+    "minimum_scope_relevance": 0.50
+  },
+  "retrieval": {
+    "github_queries": [
+      "robot vision language action",
+      "embodied ai robot learning",
+      "robot world model",
+      "vision language navigation"
+    ],
+    "huggingface_queries": [
+      "vision language action",
+      "robotics",
+      "robot world model",
+      "robot navigation"
+    ],
+    "youtube_channels": [
+      {"name": "Google DeepMind", "channel_id": "UCP7jMXSY2xbc3KCAE0MHQ-A", "keywords": ["robot", "embodied", "physical", "world model"]},
+      {"name": "Boston Dynamics", "channel_id": "UC7vVhkEfw4nOGp8TyDk7RcQ", "keywords": ["ai", "autonomous", "learning", "atlas", "robot"]},
+      {"name": "NVIDIA Developer", "channel_id": "UCBHcMCGaiJhv-ESTcWGJPcw", "keywords": ["robot", "gr00t", "isaac", "physical ai", "embodied", "cosmos"]}
+    ]
+  }
+}

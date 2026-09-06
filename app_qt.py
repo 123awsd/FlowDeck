@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote, urlparse
-from learning_feed import Store as LearningStore, build_feed as build_learning_feed_v2, context_profile
+from learning_feed import PREFERENCES_PATH, Store as LearningStore, build_feed as build_learning_feed_v2, context_profile
 from system_monitor import SystemMonitor
 try:
     from PySide6.QtCore import Qt, QTimer
@@ -308,7 +308,7 @@ class DraggableHeader(QFrame):
 
 class App(QWidget):
     def __init__(self):
-        super().__init__(); self.tasks=self.load(); self.todos=self.load_todos(); self.view_mode="monitor"; self.windows=[]; self.expanded=False; self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}; self.feed_error=""; self.feed_future=None; self.feed_executor=ThreadPoolExecutor(max_workers=1); self.feed_store=LearningStore(); self.feed_items=self.feed_store.recent(12); self.feed_stats=self.feed_store.stats(); self.learning_context={"label":"机器人前沿","terms":[]}; self.system_monitor=SystemMonitor(); self.system_executor=ThreadPoolExecutor(max_workers=1); self.system_future=None; self.system_metrics=self.system_monitor.empty(); self.system_history={"cpu":deque(maxlen=60),"memory":deque(maxlen=60),"gpu":deque(maxlen=60),"disk":deque(maxlen=60)}
+        super().__init__(); self.tasks=self.load(); self.todos=self.load_todos(); self.view_mode="monitor"; self.windows=[]; self.expanded=False; self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}; self.feed_error=""; self.feed_future=None; self.feed_executor=ThreadPoolExecutor(max_workers=1); self.feed_store=LearningStore(); self.feed_display_limit=6; self.feed_items=self.feed_store.recent(self.feed_display_limit); self.feed_stats=self.feed_store.stats(); self.learning_context={"label":"具身智能前沿","terms":[],"topics":[]}; self.system_monitor=SystemMonitor(); self.system_executor=ThreadPoolExecutor(max_workers=1); self.system_future=None; self.system_metrics=self.system_monitor.empty(); self.system_history={"cpu":deque(maxlen=60),"memory":deque(maxlen=60),"gpu":deque(maxlen=60),"disk":deque(maxlen=60)}
         try:self.seen=json.loads(SEEN_FILE.read_text())
         except Exception:self.seen={}
         self.setWindowTitle("Codex 任务总控台"); self.setWindowIcon(QIcon(str(BASE/"assets/codex-control-tower.svg"))); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setAttribute(Qt.WA_TranslucentBackground,True); self.setObjectName("root")
@@ -493,33 +493,51 @@ class App(QWidget):
             empty=QLabel("暂未读取到账号额度"); empty.setAlignment(Qt.AlignCenter); empty.setStyleSheet("color:#94a3b8;padding:14px"); h.addWidget(empty,1)
         v.addLayout(h); self.box.addWidget(p)
     def learning_panel(self):
-        panel=QFrame(); panel.setObjectName("learningPanel"); panel.setStyleSheet("QFrame#learningPanel{background:#f8faff;border:1px solid #e0e7ff;border-radius:11px} QLabel{background:transparent}"); v=QVBoxLayout(panel); v.setSizeConstraint(QLayout.SetMinimumSize); v.setContentsMargins(14,12,14,14); v.setSpacing(8)
-        head=QHBoxLayout(); titles=QVBoxLayout(); titles.setSpacing(0); title=QLabel("等待学习"); title.setFont(QFont("Noto Sans CJK SC",16,QFont.Bold)); title.setStyleSheet("color:#0f172a"); titles.addWidget(title); subtitle=QLabel("机器人前沿 · 把 Codex 等待时间变成微学习"); subtitle.setStyleSheet("color:#64748b;font-size:10px"); titles.addWidget(subtitle); head.addLayout(titles); head.addStretch()
+        panel=QFrame(); panel.setObjectName("learningPanel"); panel.setStyleSheet("QFrame#learningPanel{background:#f7f8fc;border:1px solid #e2e8f0;border-radius:11px} QLabel{background:transparent}"); v=QVBoxLayout(panel); v.setSizeConstraint(QLayout.SetMinimumSize); v.setContentsMargins(14,12,14,14); v.setSpacing(8)
+        head=QHBoxLayout(); titles=QVBoxLayout(); titles.setSpacing(0); title=QLabel("具身前沿"); title.setFont(QFont("Noto Sans CJK SC",16,QFont.Bold)); title.setStyleSheet("color:#0f172a"); titles.addWidget(title); subtitle=QLabel("兴趣只决定排序，重大更新和未知方向不会被过滤"); subtitle.setStyleSheet("color:#64748b;font-size:10px"); titles.addWidget(subtitle); head.addLayout(titles); head.addStretch()
         needs_review=[w for w in self.windows if w.get("completed",0)>self.seen.get(w.get("path",""),0)]; state_text=f"● {self.running_count} 运行中 · {len(needs_review)} 待处理"; state=QLabel(state_text); state.setStyleSheet(f"color:{'#b91c1c' if needs_review else '#1d4ed8'};background:{'#fee2e2' if needs_review else '#dbeafe'};padding:4px 9px;border-radius:6px;font-weight:700"); head.addWidget(state); v.addLayout(head)
         if needs_review:
             alert=QFrame(); alert.setObjectName("workAlert"); alert.setStyleSheet("QFrame#workAlert{background:#fff1f2;border:1px solid #fda4af;border-radius:9px} QLabel{background:transparent}"); alerts=QVBoxLayout(alert); alerts.setContentsMargins(11,8,9,8); label=QLabel(f"有 {len(needs_review)} 个 Codex 任务已经完成，需要你处理"); label.setStyleSheet("color:#9f1239;font-weight:700"); alerts.addWidget(label)
             for window in needs_review:
                 row=QHBoxLayout(); name=QLabel(window.get("folder","未命名项目")); name.setStyleSheet("color:#1e293b;font-weight:600"); row.addWidget(name,1); view=QPushButton("立即查看"); view.setStyleSheet("background:#dc2626;color:white;border:0;font-weight:700"); view.clicked.connect(lambda _,x=window:self.focus(x["id"])); row.addWidget(view); alerts.addLayout(row)
             v.addWidget(alert)
-        control_bar=QFrame(); control_bar.setObjectName("learningControls"); control_bar.setStyleSheet("QFrame#learningControls{background:white;border:1px solid #e2e8f0;border-radius:8px}"); controls=QHBoxLayout(control_bar); controls.setContentsMargins(10,6,8,6); hint=QLabel("为你筛选："+self.learning_context.get("label","机器人前沿")+" · 只看增量"); hint.setStyleSheet("color:#475569;font-size:10px"); controls.addWidget(hint); controls.addStretch(); duration_label=QLabel("时长"); duration_label.setStyleSheet("color:#64748b;font-size:10px"); controls.addWidget(duration_label)
+        control_bar=QFrame(); control_bar.setObjectName("learningControls"); control_bar.setStyleSheet("QFrame#learningControls{background:white;border:1px solid #e2e8f0;border-radius:8px}"); controls=QHBoxLayout(control_bar); controls.setContentsMargins(9,6,8,6); hint=QLabel("宽召回 · 质量门槛 · "+self.learning_context.get("label","具身智能前沿")); hint.setStyleSheet("color:#475569;font-size:10px"); controls.addWidget(hint); controls.addStretch(); settings=QPushButton("推荐设置"); settings.setToolTip("打开 learning_preferences.json"); settings.clicked.connect(self.open_learning_preferences); controls.addWidget(settings); duration_label=QLabel("时长"); duration_label.setStyleSheet("color:#64748b;font-size:10px"); controls.addWidget(duration_label)
         duration=QComboBox(); duration.addItem("3 分钟",3); duration.addItem("5 分钟",5); duration.addItem("10 分钟",10); duration.addItem("20 分钟",20); duration.setCurrentIndex(duration.findData(getattr(self,"learning_minutes",5))); duration.currentIndexChanged.connect(lambda:self.set_learning_minutes(duration.currentData())); controls.addWidget(duration)
         refresh=QPushButton("获取最新"); refresh.setEnabled(not (self.feed_future and not self.feed_future.done())); refresh.setStyleSheet("background:#4f46e5;color:white;border:0;font-weight:700"); refresh.clicked.connect(self.start_learning_feed); controls.addWidget(refresh); v.addWidget(control_bar)
         if self.feed_future and not self.feed_future.done():
-            loading=QLabel("正在扫描论文、官方 Demo 和开源模型，并生成个性化摘要…"); loading.setAlignment(Qt.AlignCenter); loading.setStyleSheet("color:#1d4ed8;background:white;padding:22px;border-radius:9px;font-weight:700"); v.addWidget(loading)
+            loading=QLabel("正在扫描 arXiv、GitHub、Hugging Face 和官方 Demo，并计算质量与多通道得分…"); loading.setAlignment(Qt.AlignCenter); loading.setStyleSheet("color:#1d4ed8;background:white;padding:22px;border-radius:9px;font-weight:700"); v.addWidget(loading)
         elif not self.feed_items:
-            empty=QLabel("点击“获取最新”，生成第一份机器人前沿学习包"); empty.setAlignment(Qt.AlignCenter); empty.setStyleSheet("color:#64748b;background:white;padding:26px;border-radius:9px"); v.addWidget(empty)
+            empty=QLabel("点击“获取最新”生成具身前沿学习包\n质量不足时会少显示，不会为了凑数填充内容"); empty.setAlignment(Qt.AlignCenter); empty.setStyleSheet("color:#64748b;background:white;padding:26px;border-radius:9px"); v.addWidget(empty)
         if self.feed_error:
             warning=QLabel("部分来源或 AI 摘要暂不可用，其他内容仍可正常阅读 · "+self.feed_error[:100]); warning.setWordWrap(True); warning.setStyleSheet("color:#b45309;background:#fffbeb;padding:7px 9px;border-radius:6px;font-size:10px"); v.addWidget(warning)
-        for item in self.feed_items:
-            read=bool(item.get("read")); kind=item.get("kind"); accent="#dc2626" if kind=="video" else ("#7c3aed" if kind=="model" else "#2563eb"); badge_bg="#f1f5f9" if read else ("#fff1f2" if kind=="video" else ("#f3e8ff" if kind=="model" else "#eff6ff")); card=QFrame(); card.setObjectName("learningCard"); card.setMinimumHeight(172); card.setSizePolicy(QSizePolicy.Preferred,QSizePolicy.Minimum); card.setStyleSheet(f"QFrame#learningCard{{background:{'#fbfcfe' if read else 'white'};border:1px solid {'#e2e8f0' if read else '#dbe3ed'};border-left:3px solid {accent};border-radius:9px}} QLabel{{background:transparent;border:0}}"); c=QVBoxLayout(card); c.setContentsMargins(11,9,11,9); c.setSpacing(5)
-            top=QHBoxLayout(); name=QLabel(item.get("title","未命名内容")); name.setWordWrap(True); name.setFont(QFont("Noto Sans CJK SC",13,QFont.Bold)); name.setStyleSheet("color:#64748b" if read else "color:#0f172a"); top.addWidget(name,1); badge_text="▶ Demo" if kind=="video" else ("◆ 模型" if kind=="model" else f"{item.get('seconds',45)} 秒"); badge=QLabel(badge_text); badge.setStyleSheet(f"color:{accent};background:{badge_bg};padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); top.addWidget(badge,0,Qt.AlignTop); c.addLayout(top)
-            meta_parts=[item.get("published","日期未知"),item.get("source","") ,f"推荐 {item.get('score','--')}"]; meta_parts.extend(item.get("tags",[])[:2]);
+        channel_colors={"core":("#2563eb","#eff6ff"),"adjacent":("#7c3aed","#f5f3ff"),"major":("#dc2626","#fff1f2"),"emerging":("#d97706","#fffbeb"),"serendipity":("#059669","#ecfdf5")}; kind_labels={"paper":"论文","repo":"代码","model":"模型","video":"Demo"}
+        for index,item in enumerate(self.feed_items):
+            read=bool(item.get("read")); channel=item.get("primary_channel","core"); accent,badge_bg=channel_colors.get(channel,channel_colors["core"]); featured=index==0; card=QFrame(); card.setObjectName("learningCard"); card.setMinimumHeight(190 if featured else 164); card.setSizePolicy(QSizePolicy.Preferred,QSizePolicy.Minimum); card.setStyleSheet(f"QFrame#learningCard{{background:{'#fbfcfe' if read else 'white'};border:1px solid {'#e2e8f0' if read else '#dbe3ed'};border-left:{'4px' if featured else '3px'} solid {accent};border-radius:9px}} QLabel{{background:transparent;border:0}}"); c=QVBoxLayout(card); c.setContentsMargins(12 if featured else 10,10 if featured else 8,11,9); c.setSpacing(5)
+            badges=QHBoxLayout(); channel_badge=QLabel(item.get("channel_label","核心关注")); channel_badge.setStyleSheet(f"color:{accent};background:{badge_bg};padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(channel_badge); media_label="▶ 有 Demo" if item.get("has_video") or item.get("kind")=="video" else kind_labels.get(item.get("kind"),"资料"); media=QLabel(media_label); media.setStyleSheet("color:#475569;background:#f1f5f9;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(media); difficulty=QLabel(item.get("difficulty","中等")); difficulty.setStyleSheet("color:#64748b;font-size:9px"); badges.addWidget(difficulty); badges.addStretch(); duration_badge=QLabel(f"{item.get('seconds',45)} 秒看懂"); duration_badge.setStyleSheet("color:#64748b;font-size:9px"); badges.addWidget(duration_badge); c.addLayout(badges)
+            name=QLabel(item.get("title","未命名内容")); name.setWordWrap(True); name.setFont(QFont("Noto Sans CJK SC",15 if featured else 13,QFont.Bold)); name.setStyleSheet("color:#64748b" if read else "color:#0f172a"); c.addWidget(name)
+            sources=" / ".join(item.get("sources") or [item.get("source","")]); meta_parts=[item.get("published","日期未知"),sources];
             if read:meta_parts.append("已读")
             meta=QLabel("  ·  ".join(str(part) for part in meta_parts if part)); meta.setStyleSheet("color:#94a3b8;font-size:9px"); c.addWidget(meta)
-            summary=QLabel("<b>一句话</b>  "+item.get("summary","")); summary.setWordWrap(True); summary.setTextFormat(Qt.RichText); summary.setStyleSheet("color:#334155;font-size:11px"); c.addWidget(summary)
-            insight=QFrame(); insight.setObjectName("learningInsight"); insight.setStyleSheet("QFrame#learningInsight{background:#f8fafc;border:0;border-radius:6px} QLabel{background:transparent;border:0}"); insight_layout=QVBoxLayout(insight); insight_layout.setContentsMargins(8,5,8,5); insight_layout.setSpacing(3); delta=QLabel("<b>增量</b>  "+item.get("delta","")); delta.setTextFormat(Qt.RichText); delta.setWordWrap(True); delta.setStyleSheet("color:#4338ca;font-size:10px"); insight_layout.addWidget(delta); why=QLabel("<b>限制 / 价值</b>  "+item.get("why","")); why.setTextFormat(Qt.RichText); why.setWordWrap(True); why.setStyleSheet("color:#475569;font-size:10px"); insight_layout.addWidget(why); c.addWidget(insight)
-            bottom=QHBoxLayout(); reason=QLabel("为什么推给你："+item.get("recommend_reason","机器人前沿探索")); reason.setWordWrap(True); reason.setStyleSheet("color:#047857;font-size:9px"); bottom.addWidget(reason,1); original=QPushButton("播放" if kind=="video" else ("打开模型" if kind=="model" else "查看原文")); original.setStyleSheet(f"background:{accent};color:white;border:0;font-weight:700"); original.clicked.connect(lambda _,u=item.get("url",""):self.open_learning_url(u)); bottom.addWidget(original); mark=QPushButton("已收藏" if item.get("saved") else "收藏深读"); mark.setStyleSheet("background:#ede9fe;color:#6d28d9;border:0" if item.get("saved") else ""); mark.clicked.connect(lambda _,u=item.get("url",""):self.toggle_learning_saved(u)); bottom.addWidget(mark); c.addLayout(bottom); v.addWidget(card)
-        stats=self.feed_stats; storage=QLabel(f"有界存储：{stats.get('count',0)}/{stats.get('limit',1000)} 条 · 收藏 {stats.get('saved',0)} · 占用 {stats.get('bytes',0)/1024/1024:.1f} MB · 普通记录60天自动清理"); storage.setAlignment(Qt.AlignCenter); storage.setStyleSheet("color:#64748b;font-size:10px;padding:6px"); v.addWidget(storage)
+            summary=QLabel("<b>30 秒看懂</b>  "+item.get("summary","")); summary.setWordWrap(True); summary.setTextFormat(Qt.RichText); summary.setStyleSheet("color:#334155;font-size:11px"); c.addWidget(summary)
+            insight=QFrame(); insight.setObjectName("learningInsight"); insight.setStyleSheet("QFrame#learningInsight{background:#f8fafc;border:0;border-radius:6px} QLabel{background:transparent;border:0}"); insight_layout=QVBoxLayout(insight); insight_layout.setContentsMargins(8,5,8,5); insight_layout.setSpacing(3); delta=QLabel("<b>相对已知工作</b>  "+item.get("delta","")); delta.setTextFormat(Qt.RichText); delta.setWordWrap(True); delta.setStyleSheet(f"color:{accent};font-size:10px"); insight_layout.addWidget(delta)
+            if featured:
+                why=QLabel("<b>为什么现在值得看</b>  "+item.get("why","")); why.setTextFormat(Qt.RichText); why.setWordWrap(True); why.setStyleSheet("color:#475569;font-size:10px"); insight_layout.addWidget(why)
+            c.addWidget(insight)
+            signals=QHBoxLayout(); signals.setSpacing(5)
+            for signal_text in item.get("signals",[])[:3]:
+                signal=QLabel(signal_text); signal.setStyleSheet("color:#475569;background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:8px"); signals.addWidget(signal)
+            signals.addStretch(); c.addLayout(signals)
+            bottom=QHBoxLayout(); reason=QLabel("入选原因："+item.get("recommend_reason","具身前沿")); reason.setWordWrap(True); reason.setStyleSheet("color:#64748b;font-size:9px"); bottom.addWidget(reason,1)
+            resources=item.get("resources",[]); resource_button=QToolButton(); resource_button.setText(f"相关资料 {len(resources)}  ▾"); resource_button.setPopupMode(QToolButton.InstantPopup); resource_button.setStyleSheet("QToolButton{padding:6px 9px;background:white;color:#475569;border:1px solid #dbe3ed;border-radius:7px} QToolButton::menu-indicator{image:none}"); resource_menu=QMenu(resource_button)
+            for resource in resources:
+                resource_kind=kind_labels.get(resource.get("kind"),"资料"); action=resource_menu.addAction(f"{resource_kind}  ·  {resource.get('source','')}  ·  {resource.get('title','')[:42]}"); action.triggered.connect(lambda _,event_url=item.get("url",""),url=resource.get("url",""):self.open_learning_url(url,event_url))
+            resource_button.setMenu(resource_menu); resource_button.setEnabled(bool(resources)); bottom.addWidget(resource_button)
+            action_url=item.get("video_url") or item.get("url",""); primary=QPushButton("播放 Demo" if item.get("video_url") or item.get("kind")=="video" else "查看资料"); primary.setStyleSheet(f"background:{accent};color:white;border:0;font-weight:700"); primary.clicked.connect(lambda _,url=action_url,event_url=item.get("url",""):self.open_learning_url(url,event_url)); bottom.addWidget(primary); mark=QPushButton("已收藏" if item.get("saved") else "收藏"); mark.setStyleSheet("background:#ede9fe;color:#6d28d9;border:0" if item.get("saved") else ""); mark.clicked.connect(lambda _,url=item.get("url",""):self.toggle_learning_saved(url)); bottom.addWidget(mark)
+            feedback=QToolButton(); feedback.setText("反馈  ▾"); feedback.setPopupMode(QToolButton.InstantPopup); feedback.setStyleSheet("QToolButton{padding:6px 9px;background:white;color:#475569;border:1px solid #dbe3ed;border-radius:7px} QToolButton::menu-indicator{image:none}"); feedback_menu=QMenu(feedback)
+            for feedback_text,feedback_action in (("多推类似内容","more_like"),("不感兴趣","dismissed"),("内容太基础","too_basic"),("内容太难","too_hard")):
+                action=feedback_menu.addAction(feedback_text); action.triggered.connect(lambda _,url=item.get("url",""),choice=feedback_action:self.feedback_learning(url,choice))
+            feedback.setMenu(feedback_menu); bottom.addWidget(feedback); c.addLayout(bottom); v.addWidget(card)
+        stats=self.feed_stats; storage=QLabel(f"有界存储：{stats.get('count',0)}/{stats.get('limit',1000)} 条 · 收藏 {stats.get('saved',0)} · {stats.get('bytes',0)/1024/1024:.1f} MB · 内容保留 60 天，热度快照保留 180 天"); storage.setAlignment(Qt.AlignCenter); storage.setStyleSheet("color:#64748b;font-size:10px;padding:6px"); v.addWidget(storage)
         self.box.addWidget(panel)
     def set_learning_minutes(self,value):self.learning_minutes=int(value or 5)
     def start_learning_feed(self):
@@ -533,19 +551,26 @@ class App(QWidget):
     def poll_learning_feed(self):
         if not self.feed_future:return
         if not self.feed_future.done():QTimer.singleShot(250,self.poll_learning_feed); return
-        try:self.feed_items,self.feed_error,self.feed_stats=self.feed_future.result()
+        try:
+            self.feed_items,self.feed_error,self.feed_stats=self.feed_future.result()
+            self.feed_display_limit=max(1,len(self.feed_items))
         except Exception as exc:self.feed_error=str(exc)
         self.feed_future=None
         if self.view_mode=="learn":self.refresh()
-    def open_learning_url(self,url):
+    def open_learning_preferences(self):
+        subprocess.Popen(["xdg-open",str(PREFERENCES_PATH)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    def open_learning_url(self,url,mark_url=None):
         if url:
-            self.feed_store.mark_read(url)
+            event_url=mark_url or url; self.feed_store.mark_read(event_url)
             for item in self.feed_items:
-                if item.get("url")==url:item["read"]=True
+                if item.get("url")==event_url:item["read"]=True
             subprocess.Popen(["xdg-open",url],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); self.refresh()
     def toggle_learning_saved(self,url):
         if url:self.feed_store.toggle_saved(url)
-        self.feed_items=self.feed_store.recent(12); self.feed_stats=self.feed_store.stats(); self.refresh()
+        self.feed_items=self.feed_store.recent(self.feed_display_limit); self.feed_stats=self.feed_store.stats(); self.refresh()
+    def feedback_learning(self,url,action):
+        if not url:return
+        self.feed_store.feedback(url,action); self.feed_items=self.feed_store.recent(self.feed_display_limit); self.feed_stats=self.feed_store.stats(); self.refresh()
     def todo_panel(self):
         today=datetime.now().strftime("%Y-%m-%d"); visible=[t for t in self.todos if not t.get("done") or t.get("done_date")==today]
         priority_order={"高":0,"中":1,"低":2}; visible.sort(key=lambda t:(bool(t.get("done")),priority_order.get(t.get("priority","中"),1),t.get("created_at","")))
