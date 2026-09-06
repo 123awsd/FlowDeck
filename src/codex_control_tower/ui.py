@@ -679,18 +679,18 @@ class App(QWidget):
         if not word:
             empty=QLabel("当前没有可用词条\n点击“导入词库”添加 UTF-8 TXT 词库"); empty.setAlignment(Qt.AlignCenter); empty.setStyleSheet("color:#64748b;background:white;padding:30px;border-radius:9px"); v.addWidget(empty); self.box.addWidget(panel); return
         state=self.vocab_store.state(word["id"]); card=QFrame(); card.setObjectName("vocabCard"); card.setStyleSheet("QFrame#vocabCard{background:white;border:1px solid #fed7aa;border-radius:12px} QLabel{background:transparent;border:0}"); body=QHBoxLayout(card); body.setContentsMargins(18,14,16,15); body.setSpacing(14); text_column=QVBoxLayout(); text_column.setSpacing(7)
-        meta_parts=[part for part in (word.get("pos"),word.get("category")) if part]; meta=QLabel(" · ".join(meta_parts) if meta_parts else "先回想它的含义"); meta.setStyleSheet("color:#c2410c;font-size:10px;font-weight:700"); text_column.addWidget(meta); title=QLabel(word["word"]); title.setFont(QFont("Noto Sans CJK SC",27,QFont.Bold)); title.setStyleSheet("color:#0f172a"); title.setWordWrap(True); text_column.addWidget(title)
+        meta_parts=[part for part in (word.get("pos"),word.get("category")) if part]; meta=QLabel(" · ".join(meta_parts) if meta_parts else "先回想它的含义"); meta.setStyleSheet("color:#c2410c;font-size:10px;font-weight:700"); text_column.addWidget(meta); title=QLabel(word["word"]); title.setStyleSheet("color:#0f172a;font-size:32px;font-weight:700"); title.setWordWrap(True); text_column.addWidget(title)
         if not self.vocab_revealed:
             clue="先别急着翻面，在脑中说出它的意思。"
             if word.get("example"):
                 blank=word["example"].replace(word["word"],"_____").replace(word["word"].capitalize(),"_____"); clue+="\n\n例句线索："+blank
-            prompt=QLabel(clue); prompt.setWordWrap(True); prompt.setStyleSheet("color:#64748b;background:#f8fafc;padding:11px;border-radius:8px;font-size:11px"); text_column.addWidget(prompt)
+            prompt=QLabel(clue); prompt.setWordWrap(True); prompt.setStyleSheet("color:#475569;background:#f8fafc;padding:12px;border-radius:8px;font-size:13px"); text_column.addWidget(prompt)
         else:
-            meaning=QLabel(word["meaning"]); meaning.setWordWrap(True); meaning.setTextInteractionFlags(Qt.TextSelectableByMouse); meaning.setStyleSheet("color:#7c2d12;background:#fff7ed;padding:11px;border-radius:8px;font-size:13px;font-weight:650"); text_column.addWidget(meaning)
+            meaning=QLabel(word["meaning"]); meaning.setWordWrap(True); meaning.setTextInteractionFlags(Qt.TextSelectableByMouse); meaning.setStyleSheet("color:#7c2d12;background:#fff7ed;padding:12px;border-radius:8px;font-size:17px;font-weight:700"); text_column.addWidget(meaning)
             if word.get("example"):
-                example=QLabel("例句  "+word["example"]); example.setWordWrap(True); example.setTextInteractionFlags(Qt.TextSelectableByMouse); example.setStyleSheet("color:#334155;font-size:10px"); text_column.addWidget(example)
+                example=QLabel("例句  "+word["example"]); example.setWordWrap(True); example.setTextInteractionFlags(Qt.TextSelectableByMouse); example.setStyleSheet("color:#334155;font-size:12px"); text_column.addWidget(example)
             if word.get("extra"):
-                extra=QLabel("拓展  "+word["extra"]); extra.setWordWrap(True); extra.setStyleSheet("color:#64748b;background:#f8fafc;padding:7px;border-radius:6px;font-size:9px"); text_column.addWidget(extra)
+                extra=QLabel("拓展  "+word["extra"]); extra.setWordWrap(True); extra.setStyleSheet("color:#64748b;background:#f8fafc;padding:8px;border-radius:6px;font-size:11px"); text_column.addWidget(extra)
         actions=QHBoxLayout(); actions.setSpacing(6); previous=QPushButton("← 上一个"); previous.setToolTip("快捷键：←"); previous.setEnabled(bool(self.vocab_history)); previous.clicked.connect(self.previous_vocab_word); actions.addWidget(previous); next_word=QPushButton("下一个 →"); next_word.setToolTip("快捷键：→"); next_word.clicked.connect(self.next_vocab_word); actions.addWidget(next_word); speak=QPushButton("朗读"); speak.setToolTip("自然语音朗读 · 快捷键：R"); speak.clicked.connect(lambda:self.speak_vocab_word(word["word"])); actions.addWidget(speak); favorite=QPushButton("已收藏" if state.get("favorite") else "收藏"); favorite.setStyleSheet("background:#fef3c7;color:#92400e;border:0" if state.get("favorite") else ""); favorite.clicked.connect(lambda:self.toggle_vocab_favorite(word["id"])); actions.addWidget(favorite); actions.addStretch()
         if not self.vocab_revealed:
             reveal=QPushButton("显示释义"); reveal.setToolTip("快捷键：空格或 Enter"); reveal.setStyleSheet("background:#f97316;color:white;border:0;font-weight:700"); reveal.clicked.connect(self.reveal_vocab_word); actions.addWidget(reveal)
@@ -698,9 +698,9 @@ class App(QWidget):
             for label,rating,style in (("忘了","forgot","background:#fff1f2;color:#be123c;border:0"),("模糊","fuzzy","background:#fffbeb;color:#a16207;border:0"),("记住了","remembered","background:#059669;color:white;border:0;font-weight:700")):
                 button=QPushButton(label); button.setToolTip("快捷键："+{"forgot":"1","fuzzy":"2","remembered":"3"}[rating]); button.setStyleSheet(style); button.clicked.connect(lambda _,value=rating:self.rate_vocab_word(value)); actions.addWidget(button)
         text_column.addLayout(actions); body.addLayout(text_column,1)
-        cat=QLabel(); cat.setAlignment(Qt.AlignCenter|Qt.AlignBottom); cat.setFixedSize(104,96); cat_path=self.vocab_cat_path(word,state); pixmap=QPixmap(str(cat_path)) if cat_path else QPixmap()
-        if not pixmap.isNull():cat.setPixmap(pixmap.scaled(96,88,Qt.KeepAspectRatio,Qt.SmoothTransformation))
-        cat.setToolTip({"forgot":"没关系，猫猫陪你再见一次","fuzzy":"已经有印象啦","remembered":"记住了，真棒"}.get(state.get("last_rating"),"先想一想，再翻面")); body.addWidget(cat); v.addWidget(card)
+        cat=QLabel(); cat.setAlignment(Qt.AlignCenter|Qt.AlignBottom); cat.setFixedSize(68,64); cat_path=self.vocab_cat_path(word,state); pixmap=QPixmap(str(cat_path)) if cat_path else QPixmap()
+        if not pixmap.isNull():cat.setPixmap(pixmap.scaled(62,58,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+        cat.setToolTip({"forgot":"没关系，猫猫陪你再见一次","fuzzy":"已经有印象啦","remembered":"记住了，真棒"}.get(state.get("last_rating"),"先想一想，再翻面")); body.addWidget(cat,0,Qt.AlignBottom); v.addWidget(card)
         tip=QLabel("快捷键  空格 显示释义  ·  ← / → 切词  ·  R 朗读  ·  1 忘了  2 模糊  3 记住了") ; tip.setAlignment(Qt.AlignCenter); tip.setStyleSheet("color:#94a3b8;font-size:9px;padding:3px"); v.addWidget(tip); self.box.addWidget(panel)
     def vocab_cat_path(self,word,state):
         paths=sorted((ASSETS_DIR/"vocab-cats").glob("*.png"))
