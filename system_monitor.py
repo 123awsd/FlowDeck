@@ -131,6 +131,11 @@ def _disks():
         if len(fields)<3:continue
         source,target,fstype=map(unescape,fields[:3]); target=target.rstrip("/") or "/"
         if fstype in pseudo_fs or target.startswith(ignored_prefixes) or not os.path.exists(target):continue
+        if target in ("/boot","/boot/efi"):continue
+        if fstype in ("ntfs","ntfs3","fuseblk"):
+            root=Path(target)
+            windows_markers=sum((root/name).exists() for name in ("Windows","Program Files","Users"))
+            if windows_markers>=2:continue
         try:usage=shutil.disk_usage(target)
         except OSError:continue
         if not usage.total:continue
