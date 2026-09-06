@@ -2,6 +2,10 @@
 
 一个基于 PyQt5/Qt 的本地浮动任务看板，适合配合 VS Code 的 Codex 和 codexswitch 使用。界面使用系统 Qt5，并直接连接 Fcitx5/Rime，支持在“今日待办”输入框中顺滑输入中文。
 
+## 项目记忆
+
+项目的长期产品约束、当前功能地图和后续事项记录在 [`docs/PROJECT_MEMORY.md`](docs/PROJECT_MEMORY.md)。领域学习系统的完整 pipeline 记录在 [`docs/LEARNING_SYSTEM.md`](docs/LEARNING_SYSTEM.md)。根目录的 `AGENTS.md` 会提醒新的 Codex 会话先读取这些文档，并要求重要决定不能只留在聊天记录中。
+
 ## 启动
 
 ```bash
