@@ -522,7 +522,7 @@ class App(QWidget):
         if self.view_mode=="monitor":
             notice=f" · {unread} 待查看" if unread else ""; self.summary.setText(f"{self.running_count} 正在运行 · {self.done_count} 已完成{notice}")
         elif self.view_mode=="todo":
-            current=next((todo for todo in self.todos if todo.get("active") and not todo.get("done")),None); self.summary.setText(("正在做 · "+current.get("text","")[:20]) if current else f"{len(active_todos)} 项待办 · 今天完成 {len(done_today)}")
+            focused=[todo for todo in self.todos if todo.get("active") and not todo.get("done")]; self.summary.setText(f"正在做 {len(focused)} 项 · 今天完成 {len(done_today)}" if focused else f"{len(active_todos)} 项待办 · 今天完成 {len(done_today)}")
         elif self.view_mode=="learn":
             bundle=self.curriculum_library.get(self.curriculum_domain_id) if self.learning_mode=="curriculum" else None
             if bundle:
@@ -1021,7 +1021,7 @@ class App(QWidget):
         priority_order={"高":0,"中":1,"低":2}; visible.sort(key=lambda t:(not bool(t.get("active") and not t.get("done")),bool(t.get("done")),priority_order.get(t.get("priority","中"),1),t.get("created_at","")))
         panel=QFrame(); panel.setObjectName("todoPanel"); panel.setStyleSheet("QFrame#todoPanel{background:#f5f3ff;border:1px solid #ddd6fe;border-radius:11px} QLabel{background:transparent}"); layout=QVBoxLayout(panel); layout.setContentsMargins(14,13,14,14); layout.setSpacing(9)
         head=QHBoxLayout(); title=QLabel("今日待办"); title.setFont(QFont("Noto Sans CJK SC",16,QFont.Bold)); title.setStyleSheet("color:#312e81"); head.addWidget(title); head.addStretch(); completed=sum(t.get("done") for t in visible); progress=QLabel(f"已完成 {completed}/{len(visible)}"); progress.setStyleSheet("color:#6d28d9;background:#ede9fe;padding:4px 9px;border-radius:6px;font-weight:700"); head.addWidget(progress); layout.addLayout(head)
-        active_todo=next((todo for todo in visible if todo.get("active") and not todo.get("done")),None); hint=QLabel("当前只聚焦一件事 · 未完成事项会自动保留到第二天" if active_todo else "点击“开始”标记当前正在做的事 · 未完成事项会自动保留到第二天"); hint.setStyleSheet("color:#7c3aed;font-size:11px"); layout.addWidget(hint)
+        active_count=sum(bool(todo.get("active") and not todo.get("done")) for todo in visible); hint=QLabel(f"当前并行推进 {active_count} 项 · 激活项统一置顶" if active_count else "可以同时激活多个正在推进的事项 · 未完成事项会自动保留到第二天"); hint.setStyleSheet("color:#7c3aed;font-size:11px"); layout.addWidget(hint)
         entry=QFrame(); entry.setStyleSheet("background:white;border:1px solid #ddd6fe;border-radius:9px"); row=QHBoxLayout(entry); row.setContentsMargins(9,8,9,8)
         self.todo_input=QLineEdit(); self.todo_input.setPlaceholderText("输入今天要做的事，按回车添加……"); self.todo_input.returnPressed.connect(self.add_todo); row.addWidget(self.todo_input,1)
         self.todo_priority=QComboBox(); self.todo_priority.addItems(["中","高","低"]); self.todo_priority.setToolTip("优先级"); row.addWidget(self.todo_priority)
@@ -1041,7 +1041,7 @@ class App(QWidget):
                 project=QLabel(todo["project"]); project.setStyleSheet("color:#4338ca;background:#eef2ff;padding:3px 7px;border-radius:5px;font-size:10px"); line.addWidget(project)
             priority=todo.get("priority","中"); fg,bg=colors.get(priority,colors["中"]); badge=QLabel(priority); badge.setStyleSheet(f"color:{fg};background:{bg};padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700"); line.addWidget(badge)
             if not todo.get("done"):
-                activate=QPushButton("暂停" if active else "开始"); activate.setToolTip("取消当前聚焦" if active else "设为当前正在做，并自动置顶"); activate.setStyleSheet("background:#4f46e5;color:white;border:0;font-weight:700" if active else "background:#eef2ff;color:#4338ca;border:1px solid #c4b5fd"); activate.clicked.connect(lambda _,t=todo:self.toggle_todo_active(t)); line.addWidget(activate)
+                activate=QPushButton("暂停" if active else "开始"); activate.setToolTip("取消这项的正在做状态" if active else "加入正在并行推进的事项并置顶"); activate.setStyleSheet("background:#4f46e5;color:white;border:0;font-weight:700" if active else "background:#eef2ff;color:#4338ca;border:1px solid #c4b5fd"); activate.clicked.connect(lambda _,t=todo:self.toggle_todo_active(t)); line.addWidget(activate)
             edit=QPushButton("编辑"); edit.setToolTip("修改内容、优先级和绑定项目"); edit.clicked.connect(lambda _,t=todo:self.edit_todo(t)); line.addWidget(edit)
             remove=QPushButton("×"); remove.setFixedSize(28,28); remove.setToolTip("删除待办"); remove.setStyleSheet("QPushButton{padding:0;border:0;background:transparent;color:#94a3b8;font-size:17px} QPushButton:hover{background:#fee2e2;color:#dc2626}"); remove.clicked.connect(lambda _,t=todo:self.delete_todo(t)); line.addWidget(remove); layout.addWidget(card)
         self.box.addWidget(panel)
@@ -1053,8 +1053,7 @@ class App(QWidget):
     def toggle_todo(self,todo,state):
         todo["done"]=bool(state); todo["done_date"]=datetime.now().strftime("%Y-%m-%d") if state else ""; todo["active"]=False if state else bool(todo.get("active")); self.save_todos(); self.refresh()
     def toggle_todo_active(self,todo):
-        activating=not bool(todo.get("active"))
-        for item in self.todos:item["active"]=bool(activating and item is todo and not item.get("done"))
+        if not todo.get("done"):todo["active"]=not bool(todo.get("active"))
         self.save_todos(); self.refresh()
     def edit_todo(self,todo):
         dialog=QDialog(self); dialog.setWindowTitle("编辑待办"); dialog.setWindowFlag(Qt.WindowStaysOnTopHint,True); dialog.setMinimumWidth(440); dialog.setStyleSheet("QDialog{background:#f8fafc} QLabel{font-family:'Noto Sans CJK SC';color:#475569} QLineEdit,QComboBox{font-family:'Noto Sans CJK SC';padding:8px;background:white;border:1px solid #cbd5e1;border-radius:7px} QPushButton{font-family:'Noto Sans CJK SC';padding:8px 14px;background:white;border:1px solid #dbe3ed;border-radius:7px}")
