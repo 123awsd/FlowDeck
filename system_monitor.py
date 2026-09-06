@@ -119,21 +119,30 @@ def _disk_io():
 
 
 def _disks():
-    mounts = ["/"]
-    workspace = Path(__file__).resolve()
-    try:
-        workspace_mount = next((line.split()[1] for line in _read_lines("/proc/mounts") if len(line.split()) >= 2 and str(workspace).startswith(line.split()[1])), None)
-        if workspace_mount and workspace_mount not in mounts:
-            mounts.append(workspace_mount)
-    except Exception:
-        pass
+    # /proc/mounts escapes spaces and non-ASCII characters using octal codes.
+    def unescape(value):
+        return value.replace("\\040", " ").replace("\\011", "\t").replace("\\134", "\\")
+
+    pseudo_fs={"autofs","binfmt_misc","bpf","cgroup","cgroup2","configfs","debugfs","devpts","devtmpfs","efivarfs","fusectl","hugetlbfs","mqueue","nsfs","pstore","proc","securityfs","squashfs","sysfs","tmpfs","tracefs"}
+    ignored_prefixes=("/proc","/sys","/dev","/run","/snap","/var/lib/docker","/tmp/fuse")
+    mounts=[]; seen=set()
+    for line in _read_lines("/proc/mounts"):
+        fields=line.split()
+        if len(fields)<3:continue
+        source,target,fstype=map(unescape,fields[:3]); target=target.rstrip("/") or "/"
+        if fstype in pseudo_fs or target.startswith(ignored_prefixes) or not os.path.exists(target):continue
+        try:usage=shutil.disk_usage(target)
+        except OSError:continue
+        if not usage.total:continue
+        # Bind mounts of the same device and size do not represent another
+        # disk; keep the shortest, human-meaningful mount point.
+        key=(source.split("[",1)[0],usage.total,usage.used)
+        if key in seen:continue
+        seen.add(key); mounts.append((target,source,fstype,usage))
+    mounts.sort(key=lambda row:(row[0]!="/",row[0].count("/"),row[0]))
     rows = []
-    for mount in mounts:
-        try:
-            usage = shutil.disk_usage(mount)
-            rows.append({"mount": mount, "total": usage.total, "used": usage.used, "free": usage.free, "percent": usage.used / usage.total * 100 if usage.total else 0})
-        except OSError:
-            pass
+    for mount,source,fstype,usage in mounts:
+        rows.append({"mount": mount, "source": source, "fstype": fstype, "total": usage.total, "used": usage.used, "free": usage.free, "percent": usage.used / usage.total * 100 if usage.total else 0})
     return rows
 
 
