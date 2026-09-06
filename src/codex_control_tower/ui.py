@@ -1,6 +1,8 @@
 """Qt UI: crisp Chinese text, VS Code discovery and task management."""
 import hashlib, json, random, shutil, sqlite3, subprocess, sys, uuid
 import time
+import urllib.error
+import urllib.request
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -36,7 +38,19 @@ _CONVERSATION_TITLES={}
 _LAST_BRIDGE_CLEANUP=0
 
 def play_vocab_audio(text):
-    """Prefer a natural online voice and fall back to the local synthesizer."""
+    """Reuse the Alt+Q local Piper voice, with online and system fallbacks."""
+    piper_url="http://127.0.0.1:59125/synthesize"; wav=Path("/tmp/codex-control-tower-vocab.wav")
+    request=urllib.request.Request(piper_url,data=json.dumps({"text":text,"length_scale":0.92}).encode("utf-8"),headers={"Content-Type":"application/json"},method="POST")
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(request,timeout=12) as response:audio=response.read()
+            if audio:
+                wav.write_bytes(audio); subprocess.run(["/usr/bin/aplay","-q",str(wav)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15); return
+        except Exception:
+            if attempt==0:
+                try:subprocess.run(["systemctl","--user","start","selection-piper.service"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=3)
+                except Exception:pass
+                time.sleep(.7)
     edge=shutil.which("edge-tts"); player=shutil.which("ffplay")
     if edge and player:
         media=Path("/tmp/codex-control-tower-vocab.mp3")
