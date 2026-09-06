@@ -1,7 +1,6 @@
 """Qt UI: crisp Chinese text, VS Code discovery and task management."""
-import hashlib, json, random, shutil, sqlite3, subprocess, sys, uuid
+import hashlib, json, random, shutil, sqlite3, subprocess, sys, tempfile, threading, uuid
 import time
-import urllib.error
 import urllib.request
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -38,33 +37,47 @@ _SESSION_STREAMS={}
 _CONVERSATION_TITLES={}
 _LAST_BRIDGE_CLEANUP=0
 
-def play_vocab_audio(text):
-    """Reuse the Alt+Q local Piper voice, with online and system fallbacks."""
-    piper_url="http://127.0.0.1:59125/synthesize"; wav=Path("/tmp/codex-control-tower-vocab.wav")
-    request=urllib.request.Request(piper_url,data=json.dumps({"text":text,"length_scale":0.92}).encode("utf-8"),headers={"Content-Type":"application/json"},method="POST")
-    for attempt in range(2):
-        try:
-            with urllib.request.urlopen(request,timeout=12) as response:audio=response.read()
-            if audio:
-                wav.write_bytes(audio); subprocess.run(["/usr/bin/aplay","-q",str(wav)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15); return
-        except Exception:
-            if attempt==0:
-                try:subprocess.run(["systemctl","--user","start","selection-piper.service"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=3)
-                except Exception:pass
-                time.sleep(.7)
-    edge=shutil.which("edge-tts"); player=shutil.which("ffplay")
-    if edge and player:
-        media=Path("/tmp/codex-control-tower-vocab.mp3")
-        try:
-            result=subprocess.run([edge,"--voice","en-US-AriaNeural","--rate","-8%","--text",text,"--write-media",str(media)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15)
-            if result.returncode==0 and media.exists() and media.stat().st_size:
-                subprocess.run([player,"-nodisp","-autoexit","-loglevel","quiet",str(media)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15); return
-        except Exception:pass
-    command=next((name for name in ("spd-say","espeak-ng","espeak") if shutil.which(name)),None)
-    if command:
-        args=[command,"-l","en","-r","-12","-t","female1",text] if command=="spd-say" else [command,"-s","145",text]
-        try:subprocess.run(args,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15)
-        except Exception:pass
+def run_cancellable_audio(args,cancel,timeout=15):
+    try:process=subprocess.Popen(args,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    except OSError:return False
+    deadline=time.monotonic()+timeout
+    while process.poll() is None:
+        if cancel.wait(.03) or time.monotonic()>=deadline:
+            process.terminate()
+            try:process.wait(timeout=1)
+            except subprocess.TimeoutExpired:process.kill()
+            return False
+    return process.returncode==0 and not cancel.is_set()
+
+def play_vocab_audio(text,cancel):
+    """Reuse the Alt+Q Piper voice and stop stale playback immediately."""
+    if cancel.is_set():return
+    with tempfile.TemporaryDirectory(prefix="codex-vocab-tts-") as directory:
+        wav=Path(directory)/"word.wav"; piper_url="http://127.0.0.1:59125/synthesize"; request=urllib.request.Request(piper_url,data=json.dumps({"text":text,"length_scale":0.92}).encode("utf-8"),headers={"Content-Type":"application/json"},method="POST")
+        for attempt in range(2):
+            try:
+                with urllib.request.urlopen(request,timeout=12) as response:audio=response.read()
+                if cancel.is_set():return
+                if audio:
+                    wav.write_bytes(audio)
+                    if run_cancellable_audio(["/usr/bin/aplay","-q",str(wav)],cancel):return
+                    if cancel.is_set():return
+            except Exception:
+                if cancel.is_set():return
+                if attempt==0:
+                    try:subprocess.run(["systemctl","--user","start","selection-piper.service"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=3)
+                    except Exception:pass
+                    if cancel.wait(.7):return
+        edge=shutil.which("edge-tts"); player=shutil.which("ffplay"); media=Path(directory)/"word.mp3"
+        if edge and player and not cancel.is_set():
+            generated=run_cancellable_audio([edge,"--voice","en-US-AriaNeural","--rate","-8%","--text",text,"--write-media",str(media)],cancel)
+            if generated and media.exists() and media.stat().st_size:
+                if run_cancellable_audio([player,"-nodisp","-autoexit","-loglevel","quiet",str(media)],cancel):return
+            if cancel.is_set():return
+        command=next((name for name in ("spd-say","espeak-ng","espeak") if shutil.which(name)),None)
+        if command and not cancel.is_set():
+            args=[command,"-l","en","-r","-12","-t","female1",text] if command=="spd-say" else [command,"-s","145",text]
+            run_cancellable_audio(args,cancel)
 
 def global_point(event):
     return event.globalPosition().toPoint() if hasattr(event,"globalPosition") else event.globalPos()
@@ -431,7 +444,7 @@ class App(QWidget):
         self.curriculum_library=CurriculumLibrary(); self.curriculum_store=CurriculumStore(); loaded=self.curriculum_library.domains(); preferred=self.curriculum_store.selected_domain()
         self.curriculum_domain_id=preferred if self.curriculum_library.get(preferred) else (loaded[0]["id"] if loaded else "")
         self.lesson_store=LessonStore(); self.lesson_chat_store=LessonChatStore(); self.lesson_executor=ThreadPoolExecutor(max_workers=1); self.tutor_executor=ThreadPoolExecutor(max_workers=1); self.lesson_future=None; self.lesson_job=None; self.lesson_errors={}; self.curriculum_card_widget=None; self.tutor_dialogs=[]; self.floating_tutor_available=False
-        self.vocab_library=VocabularyLibrary(); self.vocab_store=VocabularyStore(); vocabularies=self.vocab_library.lexicons(); self.vocab_lexicon_id=self.vocab_store.selected(vocabularies); selected_vocab=self.vocab_library.get(self.vocab_lexicon_id); self.vocab_words=self.vocab_library.load(selected_vocab["path"]) if selected_vocab else []; self.vocab_current_id=(self.vocab_store.due_words(self.vocab_words)[0]["id"] if self.vocab_words else None); self.vocab_revealed=False; self.vocab_random=False; self.vocab_history=[]; self.vocab_retry_queue=[]; self.tts_executor=ThreadPoolExecutor(max_workers=1); self.tts_future=None
+        self.vocab_library=VocabularyLibrary(); self.vocab_store=VocabularyStore(); vocabularies=self.vocab_library.lexicons(); self.vocab_lexicon_id=self.vocab_store.selected(vocabularies); selected_vocab=self.vocab_library.get(self.vocab_lexicon_id); self.vocab_words=self.vocab_library.load(selected_vocab["path"]) if selected_vocab else []; self.vocab_current_id=(self.vocab_store.due_words(self.vocab_words)[0]["id"] if self.vocab_words else None); self.vocab_revealed=False; self.vocab_random=False; self.vocab_history=[]; self.vocab_retry_queue=[]; self.vocab_last_spoken_id=None; self.vocab_audio_generation=0; self.tts_cancel=None; self.tts_executor=ThreadPoolExecutor(max_workers=3); self.tts_future=None
         self.system_monitor=SystemMonitor(); self.system_executor=ThreadPoolExecutor(max_workers=1); self.system_future=None; self.system_metrics=self.system_monitor.empty(); self.system_history={"cpu":deque(maxlen=60),"memory":deque(maxlen=60),"gpu":deque(maxlen=60),"disk":deque(maxlen=60)}
         try:self.seen=json.loads(SEEN_FILE.read_text())
         except Exception:self.seen={}
@@ -459,6 +472,7 @@ class App(QWidget):
         except Exception:return []
     def save_todos(self):TODOS_FILE.write_text(json.dumps(self.todos,ensure_ascii=False,indent=2),encoding="utf-8")
     def switch_view(self,mode):
+        if mode!="learn":self.cancel_vocab_audio(True); self.vocab_last_spoken_id=None
         self.view_mode=mode
         if mode=="system":self.schedule_system_sample()
         self.refresh()
@@ -475,9 +489,12 @@ class App(QWidget):
     def toggle(self):
         self.collapse() if self.expanded else self.expand()
     def expand(self):
-        self.expanded=True; self.setWindowFlag(Qt.FramelessWindowHint,True); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setMinimumSize(740,420); self.setMaximumSize(16777215,16777215); self.root.setContentsMargins(6,6,6,6); self.bubble.hide(); self.shell.show(); self.area.show(); self.resize(840,540); self.show(); self.update_floating_tutor(); self.update_vocab_shortcuts(); QTimer.singleShot(100,self.ensure_on_top)
+        self.expanded=True; self.setWindowFlag(Qt.FramelessWindowHint,True); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setMinimumSize(740,420); self.setMaximumSize(16777215,16777215); self.root.setContentsMargins(6,6,6,6); self.bubble.hide(); self.shell.show(); self.area.show(); self.resize(840,540); self.show(); self.update_floating_tutor(); self.update_vocab_shortcuts()
+        if self.view_mode=="learn" and self.learning_mode=="vocabulary":self.queue_vocab_autoplay(self.current_vocab_word())
+        QTimer.singleShot(100,self.ensure_on_top)
     def collapse(self):
         if self.isMaximized():self.showNormal()
+        self.cancel_vocab_audio(True); self.vocab_last_spoken_id=None
         self.expanded=False; self.floating_tutor_button.hide(); self.shell.hide(); self.bubble.show(); self.root.setContentsMargins(0,0,0,0); self.setMinimumSize(58,58); self.setMaximumSize(58,58); self.setWindowFlag(Qt.FramelessWindowHint,True); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.resize(58,58); self.show(); self.update_vocab_shortcuts(); QTimer.singleShot(100,self.ensure_on_top)
     def toggle_maximize(self):
         if self.isMaximized():self.showNormal(); self.resize(840,540)
@@ -707,6 +724,7 @@ class App(QWidget):
         self.box.addWidget(panel)
     def switch_learning_mode(self,mode):
         if mode not in ("frontier","curriculum","vocabulary") or self.learning_mode==mode:return
+        if self.learning_mode=="vocabulary":self.cancel_vocab_audio(True); self.vocab_last_spoken_id=None
         self.learning_mode=mode; self.refresh(scan_windows=False)
     def current_vocab_word(self):
         return next((word for word in self.vocab_words if word["id"]==self.vocab_current_id),self.vocab_words[0] if self.vocab_words else None)
@@ -743,7 +761,7 @@ class App(QWidget):
                 example=QLabel("例句  "+word["example"]); example.setWordWrap(True); example.setTextInteractionFlags(Qt.TextSelectableByMouse); example.setStyleSheet("color:#334155;font-size:12px"); text_column.addWidget(example)
             if word.get("extra"):
                 extra=QLabel("拓展  "+word["extra"]); extra.setWordWrap(True); extra.setStyleSheet("color:#64748b;background:#f8fafc;padding:8px;border-radius:6px;font-size:11px"); text_column.addWidget(extra)
-        actions=QHBoxLayout(); actions.setSpacing(6); previous=QPushButton("← 上一个"); previous.setToolTip("快捷键：←"); previous.setEnabled(bool(self.vocab_history)); previous.clicked.connect(self.previous_vocab_word); actions.addWidget(previous); next_word=QPushButton("下一个 →"); next_word.setToolTip("快捷键：→"); next_word.clicked.connect(self.next_vocab_word); actions.addWidget(next_word); speak=QPushButton("朗读"); speak.setToolTip("自然语音朗读 · 快捷键：R"); speak.clicked.connect(lambda:self.speak_vocab_word(word["word"])); actions.addWidget(speak); favorite=QPushButton("已收藏" if state.get("favorite") else "收藏"); favorite.setStyleSheet("background:#fef3c7;color:#92400e;border:0" if state.get("favorite") else ""); favorite.clicked.connect(lambda:self.toggle_vocab_favorite(word["id"])); actions.addWidget(favorite); actions.addStretch()
+        actions=QHBoxLayout(); actions.setSpacing(6); previous=QPushButton("← 上一个"); previous.setToolTip("快捷键：←"); previous.setEnabled(bool(self.vocab_history)); previous.clicked.connect(self.previous_vocab_word); actions.addWidget(previous); next_word=QPushButton("下一个 →"); next_word.setToolTip("快捷键：→"); next_word.clicked.connect(self.next_vocab_word); actions.addWidget(next_word); speak=QPushButton("重播"); speak.setToolTip("重新朗读当前单词 · 快捷键：R"); speak.clicked.connect(lambda:self.speak_vocab_word(word["word"])); actions.addWidget(speak); favorite=QPushButton("已收藏" if state.get("favorite") else "收藏"); favorite.setStyleSheet("background:#fef3c7;color:#92400e;border:0" if state.get("favorite") else ""); favorite.clicked.connect(lambda:self.toggle_vocab_favorite(word["id"])); actions.addWidget(favorite); actions.addStretch()
         if not self.vocab_revealed:
             reveal=QPushButton("显示释义"); reveal.setToolTip("快捷键：空格或 Enter"); reveal.setStyleSheet("background:#f97316;color:white;border:0;font-weight:700"); reveal.clicked.connect(self.reveal_vocab_word); actions.addWidget(reveal)
         else:
@@ -753,7 +771,7 @@ class App(QWidget):
         cat=QLabel(); cat.setAlignment(Qt.AlignCenter|Qt.AlignBottom); cat.setFixedSize(68,64); cat_path=self.vocab_cat_path(word,state); pixmap=QPixmap(str(cat_path)) if cat_path else QPixmap()
         if not pixmap.isNull():cat.setPixmap(pixmap.scaled(62,58,Qt.KeepAspectRatio,Qt.SmoothTransformation))
         cat.setToolTip({"forgot":"没关系，猫猫陪你再见一次","fuzzy":"已经有印象啦","remembered":"记住了，真棒"}.get(state.get("last_rating"),"先想一想，再翻面")); body.addWidget(cat,0,Qt.AlignBottom); v.addWidget(card)
-        tip=QLabel("快捷键  空格 显示释义  ·  ← / → 切词  ·  R 朗读  ·  1 忘了  2 模糊  3 记住了") ; tip.setAlignment(Qt.AlignCenter); tip.setStyleSheet("color:#94a3b8;font-size:9px;padding:3px"); v.addWidget(tip); self.box.addWidget(panel)
+        self.queue_vocab_autoplay(word); tip=QLabel("自动朗读  ·  空格 显示释义  ·  ← / → 切词  ·  R 重播  ·  1 忘了  2 模糊  3 记住了") ; tip.setAlignment(Qt.AlignCenter); tip.setStyleSheet("color:#94a3b8;font-size:9px;padding:3px"); v.addWidget(tip); self.box.addWidget(panel)
     def vocab_cat_path(self,word,state):
         paths=sorted((ASSETS_DIR/"vocab-cats").glob("*.png"))
         if not paths:return None
@@ -762,6 +780,7 @@ class App(QWidget):
         if not lexicon_id or lexicon_id==self.vocab_lexicon_id:return
         item=self.vocab_library.get(lexicon_id)
         if not item:return
+        self.cancel_vocab_audio(True)
         self.vocab_lexicon_id=lexicon_id; self.vocab_store.select(lexicon_id); self.vocab_words=self.vocab_library.load(item["path"]); queue=self.vocab_store.due_words(self.vocab_words); self.vocab_current_id=queue[0]["id"] if queue else None; self.vocab_revealed=False; self.vocab_history=[]; self.vocab_retry_queue=[]; self.refresh(scan_windows=False)
     def toggle_vocab_random(self):self.vocab_random=not self.vocab_random; self.refresh(scan_windows=False)
     def reveal_vocab_word(self):
@@ -769,18 +788,21 @@ class App(QWidget):
         self.vocab_revealed=True; self.refresh(scan_windows=False)
     def previous_vocab_word(self):
         if not self.vocab_history:return
+        self.cancel_vocab_audio(True)
         self.vocab_current_id=self.vocab_history.pop(); self.vocab_revealed=True; self.refresh(scan_windows=False)
     def next_vocab_word(self):
         word=self.current_vocab_word()
         if not word:return
         queue=[item for item in self.vocab_store.due_words(self.vocab_words) if item["id"]!=word["id"]]
         if not queue:return
+        self.cancel_vocab_audio(True)
         self.vocab_history.append(word["id"]); self.vocab_current_id=random.choice(queue[:min(100,len(queue))])["id"] if self.vocab_random else queue[0]["id"]; self.vocab_revealed=False; self.refresh(scan_windows=False)
     def rate_vocab_shortcut(self,rating):
         if self.view_mode=="learn" and self.learning_mode=="vocabulary" and self.vocab_revealed:self.rate_vocab_word(rating)
     def rate_vocab_word(self,rating):
         word=self.current_vocab_word()
         if not word:return
+        self.cancel_vocab_audio(True)
         self.vocab_store.rate(word["id"],rating); self.vocab_history.append(word["id"])
         for item in self.vocab_retry_queue:item["wait"]-=1
         if rating=="forgot":self.vocab_retry_queue.append({"id":word["id"],"wait":3})
@@ -794,9 +816,20 @@ class App(QWidget):
     def speak_current_vocab_word(self):
         word=self.current_vocab_word()
         if word:self.speak_vocab_word(word["word"])
+    def cancel_vocab_audio(self,invalidate=False):
+        if invalidate:self.vocab_audio_generation+=1
+        if self.tts_cancel:self.tts_cancel.set()
+    def queue_vocab_autoplay(self,word):
+        if not word or word["id"]==self.vocab_last_spoken_id:return
+        self.vocab_last_spoken_id=word["id"]; self.cancel_vocab_audio(True); generation=self.vocab_audio_generation; word_id=word["id"]; text=word["word"]
+        QTimer.singleShot(140,lambda:self.autoplay_vocab_word(word_id,text,generation))
+    def autoplay_vocab_word(self,word_id,text,generation):
+        if generation!=self.vocab_audio_generation or self.view_mode!="learn" or self.learning_mode!="vocabulary" or self.vocab_current_id!=word_id:return
+        self.start_vocab_audio(text)
+    def start_vocab_audio(self,text):
+        self.cancel_vocab_audio(); cancel=threading.Event(); self.tts_cancel=cancel; self.tts_future=self.tts_executor.submit(play_vocab_audio,text,cancel)
     def speak_vocab_word(self,text):
-        if self.tts_future and not self.tts_future.done():return
-        self.tts_future=self.tts_executor.submit(play_vocab_audio,text)
+        self.vocab_audio_generation+=1; self.start_vocab_audio(text)
     def import_vocabulary(self):
         source,_=QFileDialog.getOpenFileName(self,"导入词库",str(Path.home()),"文本词库 (*.txt)")
         if not source:return
@@ -1032,16 +1065,16 @@ class App(QWidget):
             empty=QLabel("今天还没有待办，先记下最重要的一件事吧"); empty.setAlignment(Qt.AlignCenter); empty.setStyleSheet("color:#94a3b8;background:white;padding:28px;border-radius:9px"); layout.addWidget(empty)
         colors={"高":("#dc2626","#fee2e2"),"中":("#d97706","#fef3c7"),"低":("#059669","#d1fae5")}
         for todo in visible:
-            active=bool(todo.get("active") and not todo.get("done")); card=QFrame(); card.setObjectName("todoCard"); card.setStyleSheet("QFrame#todoCard{background:#eef2ff;border:2px solid #6366f1;border-radius:9px}" if active else "QFrame#todoCard{background:white;border:1px solid #e9d5ff;border-radius:8px}"); line=QHBoxLayout(card); line.setContentsMargins(10 if active else 11,8,8,8)
+            active=bool(todo.get("active") and not todo.get("done")); card=QFrame(); card.setObjectName("todoCard"); card.setStyleSheet("QFrame#todoCard{background:#f0f9ff;border:1px solid #bae6fd;border-left:4px solid #38bdf8;border-radius:9px}" if active else "QFrame#todoCard{background:white;border:1px solid #e9d5ff;border-radius:8px}"); line=QHBoxLayout(card); line.setContentsMargins(9 if active else 11,8,8,8)
             check=QCheckBox(); check.setChecked(bool(todo.get("done"))); check.setCursor(Qt.PointingHandCursor); check.stateChanged.connect(lambda state,t=todo:self.toggle_todo(t,state)); line.addWidget(check)
             if active:
-                active_badge=QLabel("● 正在做"); active_badge.setStyleSheet("color:#4338ca;background:#ddd6fe;padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700"); line.addWidget(active_badge)
+                active_badge=QLabel("● 正在做"); active_badge.setStyleSheet("color:#0369a1;background:#e0f2fe;padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700"); line.addWidget(active_badge)
             text=QLabel(todo.get("text","")); text.setWordWrap(True); text.setStyleSheet("color:#94a3b8;text-decoration:line-through" if todo.get("done") else "color:#1e293b;font-size:13px;font-weight:600"); line.addWidget(text,1)
             if todo.get("project"):
                 project=QLabel(todo["project"]); project.setStyleSheet("color:#4338ca;background:#eef2ff;padding:3px 7px;border-radius:5px;font-size:10px"); line.addWidget(project)
             priority=todo.get("priority","中"); fg,bg=colors.get(priority,colors["中"]); badge=QLabel(priority); badge.setStyleSheet(f"color:{fg};background:{bg};padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700"); line.addWidget(badge)
             if not todo.get("done"):
-                activate=QPushButton("暂停" if active else "开始"); activate.setToolTip("取消这项的正在做状态" if active else "加入正在并行推进的事项并置顶"); activate.setStyleSheet("background:#4f46e5;color:white;border:0;font-weight:700" if active else "background:#eef2ff;color:#4338ca;border:1px solid #c4b5fd"); activate.clicked.connect(lambda _,t=todo:self.toggle_todo_active(t)); line.addWidget(activate)
+                activate=QPushButton("暂停" if active else "开始"); activate.setToolTip("取消这项的正在做状态" if active else "加入正在并行推进的事项并置顶"); activate.setStyleSheet("background:white;color:#0369a1;border:1px solid #bae6fd;font-weight:700" if active else "background:#f8fafc;color:#475569;border:1px solid #dbe3ed"); activate.clicked.connect(lambda _,t=todo:self.toggle_todo_active(t)); line.addWidget(activate)
             edit=QPushButton("编辑"); edit.setToolTip("修改内容、优先级和绑定项目"); edit.clicked.connect(lambda _,t=todo:self.edit_todo(t)); line.addWidget(edit)
             remove=QPushButton("×"); remove.setFixedSize(28,28); remove.setToolTip("删除待办"); remove.setStyleSheet("QPushButton{padding:0;border:0;background:transparent;color:#94a3b8;font-size:17px} QPushButton:hover{background:#fee2e2;color:#dc2626}"); remove.clicked.connect(lambda _,t=todo:self.delete_todo(t)); line.addWidget(remove); layout.addWidget(card)
         self.box.addWidget(panel)
@@ -1164,6 +1197,7 @@ class App(QWidget):
         self.collapse(); subprocess.run(["wmctrl","-i","-a",wid]); QTimer.singleShot(250,self.ensure_on_top)
     def closeEvent(self,event):
         self.timer.stop(); self.system_timer.stop()
+        self.cancel_vocab_audio(True)
         for executor in (self.feed_executor,self.system_executor,self.tts_executor):
             try:executor.shutdown(wait=False,cancel_futures=True)
             except TypeError:executor.shutdown(wait=False)
