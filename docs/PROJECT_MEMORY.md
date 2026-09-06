@@ -21,6 +21,7 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 | 系统监控 | 已实现 | CPU、内存、Swap、GPU/显存、网络、磁盘和高占用进程 | `src/codex_control_tower/system_monitor.py`、`src/codex_control_tower/ui.py` |
 | 前沿追踪 | 已实现 | 具身智能宽召回、质量门槛、五通道推荐、视频、反馈和有界存储 | `src/codex_control_tower/learning_feed.py`、`config/learning_preferences.json`、`src/codex_control_tower/ui.py` |
 | 系统学习 | 已实现 | VLA reviewed draft、三条路线、审查门禁与实际微课正文；关键课内置，其余按需生成并缓存 | `src/codex_control_tower/curriculum.py`、`src/codex_control_tower/lessons.py`、`learning/domains/vla/` |
+| 单词闪卡 | 已实现 | 主动回忆、三档间隔复习、当日进度、朗读、收藏、自定义词库和猫猫反馈 | `src/codex_control_tower/vocabulary.py`、`learning/vocabulary/`、`assets/vocab-cats/` |
 
 ## 稳定产品决定
 
@@ -57,8 +58,10 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 - 旧版只阅读课程提纲产生的进度不算正式学习进度；迁移时保存在 `legacy_outline_progress`，真实微课进度从零重新计算。
 - “和 AI 讨论”取代笼统的“换种讲法”：对话按知识点隔离，API 只接收当前课程上下文和最近问答，不接收本地项目信息；本地记录限制为每知识点 40 条、全局 1200 条。
 - 系统学习的“问 AI”必须在滚动阅读时持续可见；助教窗默认与阅读窗并排，不能直接盖住正在阅读的正文。
+- 单词闪卡以主动回忆和间隔复习为主，不做容易走马观花的自动轮播；个人词库与进度保持本地，忘词会在当前轮次短间隔重现。
+- 猫猫 PNG 和三套内置词库经用户确认来自其自有项目 `123awsd/win-floating-vocab`，允许在本项目复用；不引入原项目的第二套窗口运行时。
 
-完整设计见 [领域学习系统](LEARNING_SYSTEM.md)。
+完整设计见 [领域学习系统](LEARNING_SYSTEM.md) 和 [单词闪卡](VOCABULARY.md)。
 
 ## 数据与增长边界
 
@@ -66,6 +69,7 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 - 前沿内容普通记录保留 60 天且总数受限；收藏长期保留；热度快照保留 180 天。
 - 系统学习的 Curriculum、来源和人工审查结果属于长期知识资产，可版本管理。
 - 学习进度、反馈、薄弱点和缓存属于个人运行数据，不进入 Git。
+- 单词状态最多保存 20000 条；个人导入词库位于 `data/vocabularies/`，不进入 Git。
 
 ## 当前下一步
 
@@ -80,3 +84,4 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 - 2026-09-06：按源码、配置、运行数据、测试、扩展和打包资源重新整理仓库；根目录 `launch.sh` 保持为稳定入口。
 - 2026-09-06：导入网页版 GPT 生成的 VLA v1（18 个来源、7 个模块、39 个节点）；自动校验通过，并加入系统学习预览、路线和本地进度功能，暂不替用户冻结框架。
 - 2026-09-06：将课程节点升级为实际微课，并加入按知识点隔离、可连续追问的 DeepSeek 学习助手；微课和问答均使用有界本地缓存。
+- 2026-09-07：增加“单词闪卡”，经用户确认复用其自有 `win-floating-vocab` 项目的猫猫 PNG 和三套词库，并以主动回忆、间隔复习方式重写交互。

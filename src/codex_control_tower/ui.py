@@ -1,5 +1,5 @@
 """Qt UI: crisp Chinese text, VS Code discovery and task management."""
-import hashlib, json, sqlite3, subprocess, sys, uuid
+import hashlib, json, random, shutil, sqlite3, subprocess, sys, uuid
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -11,13 +11,14 @@ from .lessons import LessonChatStore, LessonStore, ask_lesson_tutor, generate_le
 from .learning_feed import PREFERENCES_PATH, Store as LearningStore, build_feed as build_learning_feed_v2, context_profile
 from .paths import ASSETS_DIR, DATA_DIR, PROJECT_ROOT
 from .system_monitor import SystemMonitor
+from .vocabulary import VocabularyLibrary, VocabularyStore
 try:
     from PySide6.QtCore import Qt, QTimer, QEvent, QPoint
-    from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPen, QShortcut
+    from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPen, QPixmap, QShortcut
     from PySide6.QtWidgets import *
 except ImportError:
     from PyQt5.QtCore import Qt, QTimer, QEvent, QPoint
-    from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPen
+    from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPen, QPixmap
     from PyQt5.QtWidgets import *
 
 BASE=PROJECT_ROOT; DATA=DATA_DIR/"tasks.json"; TODOS_FILE=DATA_DIR/"daily_todos.json"; EVENTS=DATA_DIR/"events.jsonl"
@@ -370,6 +371,7 @@ class App(QWidget):
         self.curriculum_library=CurriculumLibrary(); self.curriculum_store=CurriculumStore(); loaded=self.curriculum_library.domains(); preferred=self.curriculum_store.selected_domain()
         self.curriculum_domain_id=preferred if self.curriculum_library.get(preferred) else (loaded[0]["id"] if loaded else "")
         self.lesson_store=LessonStore(); self.lesson_chat_store=LessonChatStore(); self.lesson_executor=ThreadPoolExecutor(max_workers=1); self.tutor_executor=ThreadPoolExecutor(max_workers=1); self.lesson_future=None; self.lesson_job=None; self.lesson_errors={}; self.curriculum_card_widget=None; self.tutor_dialogs=[]; self.floating_tutor_available=False
+        self.vocab_library=VocabularyLibrary(); self.vocab_store=VocabularyStore(); vocabularies=self.vocab_library.lexicons(); self.vocab_lexicon_id=self.vocab_store.selected(vocabularies); selected_vocab=self.vocab_library.get(self.vocab_lexicon_id); self.vocab_words=self.vocab_library.load(selected_vocab["path"]) if selected_vocab else []; self.vocab_current_id=(self.vocab_store.due_words(self.vocab_words)[0]["id"] if self.vocab_words else None); self.vocab_revealed=False; self.vocab_random=False; self.vocab_history=[]; self.vocab_retry_queue=[]
         self.system_monitor=SystemMonitor(); self.system_executor=ThreadPoolExecutor(max_workers=1); self.system_future=None; self.system_metrics=self.system_monitor.empty(); self.system_history={"cpu":deque(maxlen=60),"memory":deque(maxlen=60),"gpu":deque(maxlen=60),"disk":deque(maxlen=60)}
         try:self.seen=json.loads(SEEN_FILE.read_text())
         except Exception:self.seen={}
@@ -457,6 +459,8 @@ class App(QWidget):
             if bundle:
                 path=self.curriculum_library.path(bundle,self.curriculum_store.selected_path(bundle)); stats=self.curriculum_store.stats(bundle,path)
                 self.summary.setText(f"学习 {stats['mastered']}/{stats['total']}")
+            elif self.learning_mode=="vocabulary":
+                stats=self.vocab_store.stats(self.vocab_words); self.summary.setText(f"单词 今日 {stats['daily']['reviewed']} · 待复习 {stats['due']}")
             else:self.summary.setText(f"{self.running_count} 个任务运行中 · {len(self.feed_items)} 条前沿卡片")
         else:
             cpu=self.system_metrics.get("cpu",{}).get("percent",0); memory=self.system_metrics.get("memory",{}).get("percent",0); gpu=self.system_metrics.get("gpu",[]); gpu_text=f"GPU {gpu[0].get('percent',0):.0f}%" if gpu else "GPU --"
@@ -572,7 +576,7 @@ class App(QWidget):
         v.addLayout(h); self.box.addWidget(p)
     def learning_panel(self):
         panel=QFrame(); panel.setObjectName("learningPanel"); panel.setStyleSheet("QFrame#learningPanel{background:#f7f8fc;border:1px solid #e2e8f0;border-radius:11px} QLabel{background:transparent}"); v=QVBoxLayout(panel); v.setSizeConstraint(QLayout.SetMinimumSize); v.setContentsMargins(14,12,14,14); v.setSpacing(8)
-        curriculum_mode=self.learning_mode=="curriculum"; head=QHBoxLayout(); titles=QVBoxLayout(); titles.setSpacing(0); title=QLabel("系统学习" if curriculum_mode else "前沿追踪"); title.setFont(QFont("Noto Sans CJK SC",16,QFont.Bold)); title.setStyleSheet("color:#0f172a"); titles.addWidget(title); subtitle=QLabel("沿稳定知识框架持续推进" if curriculum_mode else "兴趣只决定排序，重大更新和未知方向不会被过滤"); subtitle.setStyleSheet("color:#64748b;font-size:10px"); titles.addWidget(subtitle); head.addLayout(titles); head.addStretch()
+        curriculum_mode=self.learning_mode=="curriculum"; vocabulary_mode=self.learning_mode=="vocabulary"; head=QHBoxLayout(); titles=QVBoxLayout(); titles.setSpacing(0); title=QLabel("系统学习" if curriculum_mode else ("单词闪卡" if vocabulary_mode else "前沿追踪")); title.setFont(QFont("Noto Sans CJK SC",16,QFont.Bold)); title.setStyleSheet("color:#0f172a"); titles.addWidget(title); subtitle=QLabel("沿稳定知识框架持续推进" if curriculum_mode else ("主动回忆 · 间隔复习 · 碎片时间" if vocabulary_mode else "兴趣只决定排序，重大更新和未知方向不会被过滤")); subtitle.setStyleSheet("color:#64748b;font-size:10px"); titles.addWidget(subtitle); head.addLayout(titles); head.addStretch()
         needs_review=[w for w in self.windows if w.get("completed",0)>self.seen.get(w.get("path",""),0)]; state_text=f"● {self.running_count} 运行中 · {len(needs_review)} 待处理"; state=QLabel(state_text); state.setStyleSheet(f"color:{'#b91c1c' if needs_review else '#1d4ed8'};background:{'#fee2e2' if needs_review else '#dbeafe'};padding:4px 9px;border-radius:6px;font-weight:700"); head.addWidget(state); v.addLayout(head)
         if needs_review:
             alert=QFrame(); alert.setObjectName("workAlert"); alert.setStyleSheet("QFrame#workAlert{background:#fff1f2;border:1px solid #fda4af;border-radius:9px} QLabel{background:transparent}"); alerts=QVBoxLayout(alert); alerts.setContentsMargins(11,8,9,8); label=QLabel(f"有 {len(needs_review)} 个 Codex 任务已经完成，需要你处理"); label.setStyleSheet("color:#9f1239;font-weight:700"); alerts.addWidget(label)
@@ -580,11 +584,13 @@ class App(QWidget):
                 row=QHBoxLayout(); name=QLabel(window.get("folder","未命名项目")); name.setStyleSheet("color:#1e293b;font-weight:600"); row.addWidget(name,1); view=QPushButton("立即查看"); view.setStyleSheet("background:#dc2626;color:white;border:0;font-weight:700"); view.clicked.connect(lambda _,x=window:self.focus(x["id"])); row.addWidget(view); alerts.addLayout(row)
             v.addWidget(alert)
         mode_bar=QFrame(); mode_bar.setObjectName("learningModeBar"); mode_bar.setStyleSheet("QFrame#learningModeBar{background:#eef2f7;border:0;border-radius:9px}"); mode_row=QHBoxLayout(mode_bar); mode_row.setContentsMargins(4,4,4,4); mode_row.setSpacing(4)
-        for mode,label in (("frontier","前沿追踪"),("curriculum","系统学习")):
+        for mode,label in (("frontier","前沿追踪"),("curriculum","系统学习"),("vocabulary","单词闪卡")):
             button=QPushButton(label); active=self.learning_mode==mode; button.setStyleSheet("background:white;color:#3730a3;border:1px solid #dbe3ed;font-weight:700" if active else "background:transparent;color:#64748b;border:0"); button.clicked.connect(lambda _,value=mode:self.switch_learning_mode(value)); mode_row.addWidget(button)
-        mode_row.addStretch(); mode_hint=QLabel("固定框架 · 本地进度" if curriculum_mode else "动态发现 · 有界推荐"); mode_hint.setStyleSheet("color:#94a3b8;font-size:9px;padding-right:6px"); mode_row.addWidget(mode_hint); v.addWidget(mode_bar)
+        mode_row.addStretch(); mode_hint=QLabel("固定框架 · 本地进度" if curriculum_mode else ("本地词库 · 间隔复习" if vocabulary_mode else "动态发现 · 有界推荐")); mode_hint.setStyleSheet("color:#94a3b8;font-size:9px;padding-right:6px"); mode_row.addWidget(mode_hint); v.addWidget(mode_bar)
         if curriculum_mode:
             self.curriculum_panel(v,panel); return
+        if vocabulary_mode:
+            self.vocabulary_panel(v,panel); return
         control_bar=QFrame(); control_bar.setObjectName("learningControls"); control_bar.setStyleSheet("QFrame#learningControls{background:white;border:1px solid #e2e8f0;border-radius:8px}"); controls=QHBoxLayout(control_bar); controls.setContentsMargins(9,6,8,6); hint=QLabel("宽召回 · 质量门槛 · "+self.learning_context.get("label","具身智能前沿")); hint.setStyleSheet("color:#475569;font-size:10px"); controls.addWidget(hint); controls.addStretch(); settings=QPushButton("推荐设置"); settings.setToolTip("打开 learning_preferences.json"); settings.clicked.connect(self.open_learning_preferences); controls.addWidget(settings); duration_label=QLabel("时长"); duration_label.setStyleSheet("color:#64748b;font-size:10px"); controls.addWidget(duration_label)
         duration=QComboBox(); duration.addItem("3 分钟",3); duration.addItem("5 分钟",5); duration.addItem("10 分钟",10); duration.addItem("20 分钟",20); duration.setCurrentIndex(duration.findData(getattr(self,"learning_minutes",5))); duration.currentIndexChanged.connect(lambda:self.set_learning_minutes(duration.currentData())); controls.addWidget(duration)
         refresh=QPushButton("获取最新"); refresh.setEnabled(not (self.feed_future and not self.feed_future.done())); refresh.setStyleSheet("background:#4f46e5;color:white;border:0;font-weight:700"); refresh.clicked.connect(self.start_learning_feed); controls.addWidget(refresh); v.addWidget(control_bar)
@@ -624,8 +630,82 @@ class App(QWidget):
         stats=self.feed_stats; storage=QLabel(f"有界存储：{stats.get('count',0)}/{stats.get('limit',1000)} 条 · 收藏 {stats.get('saved',0)} · {stats.get('bytes',0)/1024/1024:.1f} MB · 内容保留 60 天，热度快照保留 180 天"); storage.setAlignment(Qt.AlignCenter); storage.setStyleSheet("color:#64748b;font-size:10px;padding:6px"); v.addWidget(storage)
         self.box.addWidget(panel)
     def switch_learning_mode(self,mode):
-        if mode not in ("frontier","curriculum") or self.learning_mode==mode:return
+        if mode not in ("frontier","curriculum","vocabulary") or self.learning_mode==mode:return
         self.learning_mode=mode; self.refresh(scan_windows=False)
+    def current_vocab_word(self):
+        return next((word for word in self.vocab_words if word["id"]==self.vocab_current_id),self.vocab_words[0] if self.vocab_words else None)
+    def vocabulary_panel(self,v,panel):
+        lexicons=self.vocab_library.lexicons(); stats=self.vocab_store.stats(self.vocab_words); word=self.current_vocab_word()
+        controls=QFrame(); controls.setObjectName("vocabControls"); controls.setStyleSheet("QFrame#vocabControls{background:white;border:1px solid #e2e8f0;border-radius:9px}"); row=QHBoxLayout(controls); row.setContentsMargins(9,6,8,6); row.setSpacing(6); library_label=QLabel("词库"); library_label.setStyleSheet("color:#64748b;font-size:10px"); row.addWidget(library_label); selector=QComboBox()
+        for item in lexicons:selector.addItem(f"{item['name']} · {item['count']}",item["id"])
+        selector.setCurrentIndex(max(0,selector.findData(self.vocab_lexicon_id))); selector.currentIndexChanged.connect(lambda:self.select_vocabulary(selector.currentData())); row.addWidget(selector,1); random_button=QPushButton("随机" if self.vocab_random else "顺序"); random_button.setToolTip("切换出词顺序"); random_button.clicked.connect(self.toggle_vocab_random); row.addWidget(random_button); imported=QPushButton("导入词库"); imported.clicked.connect(self.import_vocabulary); row.addWidget(imported); v.addWidget(controls)
+
+        progress=QFrame(); progress.setObjectName("vocabProgress"); progress.setStyleSheet("QFrame#vocabProgress{background:#fff7ed;border:1px solid #fed7aa;border-radius:9px} QLabel{background:transparent}"); progress_layout=QVBoxLayout(progress); progress_layout.setContentsMargins(11,7,11,8); progress_layout.setSpacing(4); progress_top=QHBoxLayout(); today=stats["daily"]; progress_title=QLabel(f"今日 {today['reviewed']} 个"); progress_title.setStyleSheet("color:#9a3412;font-weight:700"); progress_top.addWidget(progress_title); progress_top.addStretch(); progress_meta=QLabel(f"待复习 {stats['due']} · 已学 {stats['learned']}/{stats['total']} · 收藏 {stats['favorites']}"); progress_meta.setStyleSheet("color:#c2410c;font-size:9px"); progress_top.addWidget(progress_meta); progress_layout.addLayout(progress_top); daily_bar=QProgressBar(); daily_bar.setRange(0,20); daily_bar.setValue(min(20,today["reviewed"])); daily_bar.setTextVisible(False); daily_bar.setStyleSheet("QProgressBar{height:6px;background:#ffedd5;border:0;border-radius:3px} QProgressBar::chunk{background:#fb923c;border-radius:3px}"); progress_layout.addWidget(daily_bar); v.addWidget(progress)
+
+        if not word:
+            empty=QLabel("当前没有可用词条\n点击“导入词库”添加 UTF-8 TXT 词库"); empty.setAlignment(Qt.AlignCenter); empty.setStyleSheet("color:#64748b;background:white;padding:30px;border-radius:9px"); v.addWidget(empty); self.box.addWidget(panel); return
+        state=self.vocab_store.state(word["id"]); card=QFrame(); card.setObjectName("vocabCard"); card.setStyleSheet("QFrame#vocabCard{background:white;border:1px solid #fed7aa;border-radius:12px} QLabel{background:transparent;border:0}"); body=QHBoxLayout(card); body.setContentsMargins(18,14,16,15); body.setSpacing(14); text_column=QVBoxLayout(); text_column.setSpacing(7)
+        meta_parts=[part for part in (word.get("pos"),word.get("category")) if part]; meta=QLabel(" · ".join(meta_parts) if meta_parts else "先回想它的含义"); meta.setStyleSheet("color:#c2410c;font-size:10px;font-weight:700"); text_column.addWidget(meta); title=QLabel(word["word"]); title.setFont(QFont("Noto Sans CJK SC",27,QFont.Bold)); title.setStyleSheet("color:#0f172a"); title.setWordWrap(True); text_column.addWidget(title)
+        if not self.vocab_revealed:
+            clue="先别急着翻面，在脑中说出它的意思。"
+            if word.get("example"):
+                blank=word["example"].replace(word["word"],"_____").replace(word["word"].capitalize(),"_____"); clue+="\n\n例句线索："+blank
+            prompt=QLabel(clue); prompt.setWordWrap(True); prompt.setStyleSheet("color:#64748b;background:#f8fafc;padding:11px;border-radius:8px;font-size:11px"); text_column.addWidget(prompt)
+        else:
+            meaning=QLabel(word["meaning"]); meaning.setWordWrap(True); meaning.setTextInteractionFlags(Qt.TextSelectableByMouse); meaning.setStyleSheet("color:#7c2d12;background:#fff7ed;padding:11px;border-radius:8px;font-size:13px;font-weight:650"); text_column.addWidget(meaning)
+            if word.get("example"):
+                example=QLabel("例句  "+word["example"]); example.setWordWrap(True); example.setTextInteractionFlags(Qt.TextSelectableByMouse); example.setStyleSheet("color:#334155;font-size:10px"); text_column.addWidget(example)
+            if word.get("extra"):
+                extra=QLabel("拓展  "+word["extra"]); extra.setWordWrap(True); extra.setStyleSheet("color:#64748b;background:#f8fafc;padding:7px;border-radius:6px;font-size:9px"); text_column.addWidget(extra)
+        actions=QHBoxLayout(); actions.setSpacing(6); previous=QPushButton("← 上一个"); previous.setEnabled(bool(self.vocab_history)); previous.clicked.connect(self.previous_vocab_word); actions.addWidget(previous); speak=QPushButton("朗读"); speak.clicked.connect(lambda:self.speak_vocab_word(word["word"])); actions.addWidget(speak); favorite=QPushButton("已收藏" if state.get("favorite") else "收藏"); favorite.setStyleSheet("background:#fef3c7;color:#92400e;border:0" if state.get("favorite") else ""); favorite.clicked.connect(lambda:self.toggle_vocab_favorite(word["id"])); actions.addWidget(favorite); actions.addStretch()
+        if not self.vocab_revealed:
+            reveal=QPushButton("显示释义"); reveal.setStyleSheet("background:#f97316;color:white;border:0;font-weight:700"); reveal.clicked.connect(self.reveal_vocab_word); actions.addWidget(reveal)
+        else:
+            for label,rating,style in (("忘了","forgot","background:#fff1f2;color:#be123c;border:0"),("模糊","fuzzy","background:#fffbeb;color:#a16207;border:0"),("记住了","remembered","background:#059669;color:white;border:0;font-weight:700")):
+                button=QPushButton(label); button.setStyleSheet(style); button.clicked.connect(lambda _,value=rating:self.rate_vocab_word(value)); actions.addWidget(button)
+        text_column.addLayout(actions); body.addLayout(text_column,1)
+        cat=QLabel(); cat.setAlignment(Qt.AlignCenter); cat.setFixedSize(170,150); cat_path=self.vocab_cat_path(word,state); pixmap=QPixmap(str(cat_path)) if cat_path else QPixmap()
+        if not pixmap.isNull():cat.setPixmap(pixmap.scaled(160,140,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+        cat.setToolTip({"forgot":"没关系，猫猫陪你再见一次","fuzzy":"已经有印象啦","remembered":"记住了，真棒"}.get(state.get("last_rating"),"先想一想，再翻面")); body.addWidget(cat); v.addWidget(card)
+        tip=QLabel("建议先主动回想，再显示释义；评价只决定复习间隔，不会删除单词。每日进度目标为 20 个。") ; tip.setAlignment(Qt.AlignCenter); tip.setStyleSheet("color:#94a3b8;font-size:9px;padding:3px"); v.addWidget(tip); self.box.addWidget(panel)
+    def vocab_cat_path(self,word,state):
+        paths=sorted((ASSETS_DIR/"vocab-cats").glob("*.png"))
+        if not paths:return None
+        offset={"forgot":0,"fuzzy":7,"remembered":15}.get(state.get("last_rating"),23); return paths[(int(word["id"][:8],16)+offset)%len(paths)]
+    def select_vocabulary(self,lexicon_id):
+        if not lexicon_id or lexicon_id==self.vocab_lexicon_id:return
+        item=self.vocab_library.get(lexicon_id)
+        if not item:return
+        self.vocab_lexicon_id=lexicon_id; self.vocab_store.select(lexicon_id); self.vocab_words=self.vocab_library.load(item["path"]); queue=self.vocab_store.due_words(self.vocab_words); self.vocab_current_id=queue[0]["id"] if queue else None; self.vocab_revealed=False; self.vocab_history=[]; self.vocab_retry_queue=[]; self.refresh(scan_windows=False)
+    def toggle_vocab_random(self):self.vocab_random=not self.vocab_random; self.refresh(scan_windows=False)
+    def reveal_vocab_word(self):self.vocab_revealed=True; self.refresh(scan_windows=False)
+    def previous_vocab_word(self):
+        if not self.vocab_history:return
+        self.vocab_current_id=self.vocab_history.pop(); self.vocab_revealed=True; self.refresh(scan_windows=False)
+    def rate_vocab_word(self,rating):
+        word=self.current_vocab_word()
+        if not word:return
+        self.vocab_store.rate(word["id"],rating); self.vocab_history.append(word["id"])
+        for item in self.vocab_retry_queue:item["wait"]-=1
+        if rating=="forgot":self.vocab_retry_queue.append({"id":word["id"],"wait":3})
+        ready=next((item for item in self.vocab_retry_queue if item["wait"]<=0 and item["id"]!=word["id"]),None)
+        if ready:self.vocab_retry_queue.remove(ready); self.vocab_current_id=ready["id"]
+        else:
+            queue=[item for item in self.vocab_store.due_words(self.vocab_words) if item["id"]!=word["id"]]
+            if queue:self.vocab_current_id=(random.choice(queue[:min(100,len(queue))])["id"] if self.vocab_random else queue[0]["id"])
+        self.vocab_revealed=False; self.refresh(scan_windows=False)
+    def toggle_vocab_favorite(self,word_id):self.vocab_store.toggle_favorite(word_id); self.refresh(scan_windows=False)
+    def speak_vocab_word(self,text):
+        command=next((name for name in ("spd-say","espeak-ng","espeak") if shutil.which(name)),None)
+        if command:
+            args=[command,"-w",text] if command=="spd-say" else [command,text]; subprocess.Popen(args,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        else:QMessageBox.information(self,"朗读不可用","未检测到 spd-say、espeak-ng 或 espeak。")
+    def import_vocabulary(self):
+        source,_=QFileDialog.getOpenFileName(self,"导入词库",str(Path.home()),"文本词库 (*.txt)")
+        if not source:return
+        try:lexicon_id=self.vocab_library.import_file(source)
+        except Exception as exc:QMessageBox.warning(self,"导入失败",str(exc)); return
+        self.vocab_lexicon_id=""; self.select_vocabulary(lexicon_id)
     def curriculum_panel(self,v,panel):
         self.curriculum_card_widget=None
         bundle=self.curriculum_library.get(self.curriculum_domain_id)
