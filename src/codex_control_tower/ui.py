@@ -313,7 +313,7 @@ class LessonChatDialog(QDialog):
     """A lightweight, concept-scoped tutor using the existing DeepSeek key."""
     def __init__(self,parent,bundle,concept,lesson,store,executor):
         super().__init__(parent); self.bundle=bundle; self.concept=concept; self.lesson=lesson; self.store=store; self.executor=executor; self.future=None; self._close_after_answer=False
-        self.setWindowTitle("AI 学习助手 · "+concept.get("title_zh","当前知识点")); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setMinimumSize(560,520); self.resize(640,680); self.setStyleSheet("QDialog{background:#f8fafc} QLabel{font-family:'Noto Sans CJK SC';color:#172033} QPushButton{font-family:'Noto Sans CJK SC';padding:7px 12px;background:white;border:1px solid #dbe3ed;border-radius:7px} QPushButton:hover{background:#eef2ff;border-color:#a5b4fc} QPlainTextEdit{font-family:'Noto Sans CJK SC';font-size:12px;color:#172033;background:white;border:1px solid #cbd5e1;border-radius:9px;padding:8px}")
+        self.setWindowTitle("AI 学习助手 · "+concept.get("title_zh","当前知识点")); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setMinimumSize(460,480); self.resize(540,680); self.setStyleSheet("QDialog{background:#f8fafc} QLabel{font-family:'Noto Sans CJK SC';color:#172033} QPushButton{font-family:'Noto Sans CJK SC';padding:7px 12px;background:white;border:1px solid #dbe3ed;border-radius:7px} QPushButton:hover{background:#eef2ff;border-color:#a5b4fc} QPlainTextEdit{font-family:'Noto Sans CJK SC';font-size:12px;color:#172033;background:white;border:1px solid #cbd5e1;border-radius:9px;padding:8px}")
         root=QVBoxLayout(self); root.setContentsMargins(14,13,14,14); root.setSpacing(9)
         head=QHBoxLayout(); titles=QVBoxLayout(); titles.setSpacing(1); title=QLabel("AI 学习助手"); title.setFont(QFont("Noto Sans CJK SC",16,QFont.Bold)); title.setStyleSheet("color:#312e81"); titles.addWidget(title); subtitle=QLabel("当前课程 · "+concept.get("title_zh","知识点")); subtitle.setStyleSheet("color:#64748b;font-size:10px"); titles.addWidget(subtitle); head.addLayout(titles); head.addStretch(); clear=QPushButton("清空对话"); clear.clicked.connect(self.clear_chat); head.addWidget(clear); root.addLayout(head)
         privacy=QLabel("只会把当前知识点、当前微课和你在这里的提问发送给 DeepSeek；项目路径、账号和 Codex 对话不会发送。对话记录仅保存在本机。")
@@ -369,7 +369,7 @@ class App(QWidget):
         self.learning_context={"label":"具身智能前沿","terms":[],"topics":[]}; self.learning_mode="frontier"
         self.curriculum_library=CurriculumLibrary(); self.curriculum_store=CurriculumStore(); loaded=self.curriculum_library.domains(); preferred=self.curriculum_store.selected_domain()
         self.curriculum_domain_id=preferred if self.curriculum_library.get(preferred) else (loaded[0]["id"] if loaded else "")
-        self.lesson_store=LessonStore(); self.lesson_chat_store=LessonChatStore(); self.lesson_executor=ThreadPoolExecutor(max_workers=1); self.tutor_executor=ThreadPoolExecutor(max_workers=1); self.lesson_future=None; self.lesson_job=None; self.lesson_errors={}; self.curriculum_card_widget=None; self.tutor_dialogs=[]
+        self.lesson_store=LessonStore(); self.lesson_chat_store=LessonChatStore(); self.lesson_executor=ThreadPoolExecutor(max_workers=1); self.tutor_executor=ThreadPoolExecutor(max_workers=1); self.lesson_future=None; self.lesson_job=None; self.lesson_errors={}; self.curriculum_card_widget=None; self.tutor_dialogs=[]; self.floating_tutor_available=False
         self.system_monitor=SystemMonitor(); self.system_executor=ThreadPoolExecutor(max_workers=1); self.system_future=None; self.system_metrics=self.system_monitor.empty(); self.system_history={"cpu":deque(maxlen=60),"memory":deque(maxlen=60),"gpu":deque(maxlen=60),"disk":deque(maxlen=60)}
         try:self.seen=json.loads(SEEN_FILE.read_text())
         except Exception:self.seen={}
@@ -386,7 +386,7 @@ class App(QWidget):
         controls=(("—","缩成悬浮球",self.collapse),("□","最大化 / 还原",self.toggle_maximize),("×","关闭",self.close))
         for text,tip,fn in controls:
             button=QPushButton(text); button.setFixedSize(32,30); button.setToolTip(tip); button.setStyleSheet("QPushButton{padding:0;background:transparent;border:0;border-radius:7px;font-size:16px;color:#475569} QPushButton:hover{background:#e2e8f0}" if text!="×" else "QPushButton{padding:0;background:transparent;border:0;border-radius:7px;font-size:18px;color:#475569} QPushButton:hover{background:#fee2e2;color:#dc2626}"); button.clicked.connect(fn); h.addWidget(button)
-        shell_layout.addWidget(self.header); self.area=QScrollArea(); self.area.setWidgetResizable(True); self.content=QWidget(); self.box=QVBoxLayout(self.content); self.box.setSpacing(7); self.area.setWidget(self.content); shell_layout.addWidget(self.area); self.root.addWidget(self.shell); self.refresh(); self.collapse()
+        shell_layout.addWidget(self.header); self.area=QScrollArea(); self.area.setWidgetResizable(True); self.content=QWidget(); self.box=QVBoxLayout(self.content); self.box.setSpacing(7); self.area.setWidget(self.content); shell_layout.addWidget(self.area); self.floating_tutor_button=QPushButton("问 AI",self.area.viewport()); self.floating_tutor_button.setFixedSize(72,36); self.floating_tutor_button.setCursor(Qt.PointingHandCursor); self.floating_tutor_button.setToolTip("随时围绕当前课程提问"); self.floating_tutor_button.setStyleSheet("QPushButton{background:#4f46e5;color:white;border:1px solid #c7d2fe;border-radius:18px;font-weight:700} QPushButton:hover{background:#4338ca}"); tutor_shadow=QGraphicsDropShadowEffect(self.floating_tutor_button); tutor_shadow.setBlurRadius(16); tutor_shadow.setOffset(0,3); tutor_shadow.setColor(QColor(49,46,129,100)); self.floating_tutor_button.setGraphicsEffect(tutor_shadow); self.floating_tutor_button.clicked.connect(self.open_curriculum_tutor); self.floating_tutor_button.hide(); self.area.viewport().installEventFilter(self); self.root.addWidget(self.shell); self.refresh(); self.collapse()
         self.timer=QTimer(self); self.timer.timeout.connect(self.periodic_refresh); self.timer.start(5000); self.system_timer=QTimer(self); self.system_timer.timeout.connect(self.schedule_system_sample); self.system_timer.start(2000)
     def load(self):
         try:return json.loads(DATA.read_text())
@@ -413,10 +413,10 @@ class App(QWidget):
     def toggle(self):
         self.collapse() if self.expanded else self.expand()
     def expand(self):
-        self.expanded=True; self.setWindowFlag(Qt.FramelessWindowHint,True); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setMinimumSize(740,420); self.setMaximumSize(16777215,16777215); self.root.setContentsMargins(6,6,6,6); self.bubble.hide(); self.shell.show(); self.area.show(); self.resize(840,540); self.show(); QTimer.singleShot(100,self.ensure_on_top)
+        self.expanded=True; self.setWindowFlag(Qt.FramelessWindowHint,True); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setMinimumSize(740,420); self.setMaximumSize(16777215,16777215); self.root.setContentsMargins(6,6,6,6); self.bubble.hide(); self.shell.show(); self.area.show(); self.resize(840,540); self.show(); self.update_floating_tutor(); QTimer.singleShot(100,self.ensure_on_top)
     def collapse(self):
         if self.isMaximized():self.showNormal()
-        self.expanded=False; self.shell.hide(); self.bubble.show(); self.root.setContentsMargins(0,0,0,0); self.setMinimumSize(58,58); self.setMaximumSize(58,58); self.setWindowFlag(Qt.FramelessWindowHint,True); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.resize(58,58); self.show(); QTimer.singleShot(100,self.ensure_on_top)
+        self.expanded=False; self.floating_tutor_button.hide(); self.shell.hide(); self.bubble.show(); self.root.setContentsMargins(0,0,0,0); self.setMinimumSize(58,58); self.setMaximumSize(58,58); self.setWindowFlag(Qt.FramelessWindowHint,True); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.resize(58,58); self.show(); QTimer.singleShot(100,self.ensure_on_top)
     def toggle_maximize(self):
         if self.isMaximized():self.showNormal(); self.resize(840,540)
         else:self.setMaximumSize(16777215,16777215); self.showMaximized()
@@ -429,6 +429,16 @@ class App(QWidget):
         while self.box.count():
             x=self.box.takeAt(0); w=x.widget()
             if w:w.deleteLater()
+    def eventFilter(self,obj,event):
+        if hasattr(self,"area") and obj is self.area.viewport() and event.type()==QEvent.Resize:QTimer.singleShot(0,self.position_floating_tutor)
+        return super().eventFilter(obj,event)
+    def position_floating_tutor(self):
+        if not hasattr(self,"floating_tutor_button"):return
+        viewport=self.area.viewport(); button=self.floating_tutor_button; button.move(max(8,viewport.width()-button.width()-18),max(8,viewport.height()-button.height()-16)); button.raise_()
+    def update_floating_tutor(self):
+        visible=bool(self.expanded and self.view_mode=="learn" and self.learning_mode=="curriculum" and self.floating_tutor_available)
+        self.floating_tutor_button.setVisible(visible)
+        if visible:self.position_floating_tutor()
     def refresh(self,render=True,scan_windows=True):
         if scan_windows:
             self.windows=scan(); active=active_window_id(); seen_changed=False
@@ -453,7 +463,7 @@ class App(QWidget):
             self.summary.setText(f"CPU {cpu:.0f}% · 内存 {memory:.0f}% · {gpu_text}")
         self.update_tabs(); self.bubble.setUnread(unread); self.bubble.setToolTip(f"运行 {self.running_count} · 完成 {self.done_count} · 待查看 {unread} · 今日待办 {len(active_todos)}")
         if not render:return
-        self.clear()
+        self.floating_tutor_available=False; self.clear()
         if self.view_mode=="monitor":
             self.window_panel()
             for t in self.tasks:self.task_card(t)
@@ -461,7 +471,7 @@ class App(QWidget):
         elif self.view_mode=="todo":self.todo_panel()
         elif self.view_mode=="learn":self.learning_panel()
         else:self.system_panel()
-        self.box.addStretch()
+        self.box.addStretch(); self.update_floating_tutor()
     def schedule_system_sample(self):
         if self.view_mode!="system":return
         if self.system_future and not self.system_future.done():return
@@ -643,9 +653,10 @@ class App(QWidget):
         if concept:
             modules={item["id"]:item for item in bundle["modules"]}; module=modules.get(concept.get("module_id"),{}); position=path.index(current_id)+1 if current_id in path else 1; state=self.curriculum_store.state(bundle,current_id); lesson=self.lesson_store.get(bundle,current_id)
             card=QFrame(); self.curriculum_card_widget=card; card.setObjectName("conceptCard"); card.setStyleSheet("QFrame#conceptCard{background:white;border:1px solid #dbe3ed;border-left:4px solid #6366f1;border-radius:10px} QLabel{background:transparent;border:0}"); card_layout=QVBoxLayout(card); card_layout.setContentsMargins(14,11,14,12); card_layout.setSpacing(9)
-            badges=QHBoxLayout(); module_badge=QLabel(module.get("title_zh","VLA")); module_badge.setStyleSheet("color:#4338ca;background:#eef2ff;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(module_badge); priority=QLabel(concept.get("priority","P1")); priority.setStyleSheet("color:#b45309;background:#fef3c7;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(priority); stability_labels={"foundation":"稳定基础","evolving":"持续演进","frontier":"前沿扩展"}; stability=QLabel(stability_labels.get(concept.get("stability"),concept.get("stability",""))); stability.setStyleSheet("color:#0369a1;background:#e0f2fe;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(stability); state_badge=QLabel(STATE_LABELS.get(state,"未学习")); state_badge.setStyleSheet("color:#047857;background:#ecfdf5;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(state_badge); badges.addStretch(); tutor_top=QPushButton("问 AI"); tutor_top.setEnabled(approved and bool(lesson)); tutor_top.setToolTip("围绕当前知识点连续追问" if lesson else "需要先生成教学正文"); tutor_top.setStyleSheet("padding:4px 9px;background:#eef2ff;color:#4338ca;border:0;font-size:9px;font-weight:700"); tutor_top.clicked.connect(self.open_curriculum_tutor); badges.addWidget(tutor_top); number=QLabel(f"第 {position}/{len(path)} 项 · {concept.get('estimated_card_minutes',4)} 分钟"); number.setStyleSheet("color:#64748b;font-size:9px"); badges.addWidget(number); card_layout.addLayout(badges)
+            badges=QHBoxLayout(); module_badge=QLabel(module.get("title_zh","VLA")); module_badge.setStyleSheet("color:#4338ca;background:#eef2ff;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(module_badge); priority=QLabel(concept.get("priority","P1")); priority.setStyleSheet("color:#b45309;background:#fef3c7;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(priority); stability_labels={"foundation":"稳定基础","evolving":"持续演进","frontier":"前沿扩展"}; stability=QLabel(stability_labels.get(concept.get("stability"),concept.get("stability",""))); stability.setStyleSheet("color:#0369a1;background:#e0f2fe;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(stability); state_badge=QLabel(STATE_LABELS.get(state,"未学习")); state_badge.setStyleSheet("color:#047857;background:#ecfdf5;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(state_badge); badges.addStretch(); number=QLabel(f"第 {position}/{len(path)} 项 · {concept.get('estimated_card_minutes',4)} 分钟"); number.setStyleSheet("color:#64748b;font-size:9px"); badges.addWidget(number); card_layout.addLayout(badges)
             concept_title=QLabel(concept.get("title_zh","未命名知识点")); concept_title.setFont(QFont("Noto Sans CJK SC",17,QFont.Bold)); concept_title.setStyleSheet("color:#0f172a"); card_layout.addWidget(concept_title); english=QLabel(concept.get("title_en","")); english.setStyleSheet("color:#64748b;font-size:10px"); card_layout.addWidget(english)
             if lesson:
+                self.floating_tutor_available=bool(approved)
                 self.render_curriculum_lesson(card_layout,lesson)
                 if approved and not self.lesson_future:QTimer.singleShot(700,lambda b=bundle,p=list(path),c=current_id:self.prefetch_next_lesson(b,p,c))
             elif approved:
@@ -728,7 +739,27 @@ class App(QWidget):
         if not bundle or not current:return
         lesson=self.lesson_store.get(bundle,current)
         if not lesson:return
-        dialog=LessonChatDialog(self,bundle,bundle["concept_by_id"][current],lesson,self.lesson_chat_store,self.tutor_executor); self.tutor_dialogs.append(dialog); dialog.finished.connect(lambda _,item=dialog:self.release_tutor_dialog(item)); dialog.show(); dialog.raise_(); dialog.activateWindow()
+        dialog=LessonChatDialog(self,bundle,bundle["concept_by_id"][current],lesson,self.lesson_chat_store,self.tutor_executor); self.tutor_dialogs.append(dialog); dialog.finished.connect(lambda _,item=dialog:self.release_tutor_dialog(item)); dialog.show(); self.place_tutor_dialog(dialog); dialog.raise_(); dialog.activateWindow()
+    def place_tutor_dialog(self,dialog):
+        if self.isMaximized():self.showNormal(); self.resize(840,min(900,max(540,QApplication.primaryScreen().availableGeometry().height()-40))); QApplication.processEvents()
+        screens=QApplication.screens(); main_rect=self.frameGeometry(); current=QApplication.screenAt(main_rect.center()) or QApplication.primaryScreen(); available=current.availableGeometry(); gap=12
+        dialog_width=min(540,max(440,available.width()-main_rect.width()-gap-28)); dialog_height=min(680,available.height()-28); dialog.resize(dialog_width,dialog_height)
+        right_space=available.right()-main_rect.right(); left_space=main_rect.left()-available.left()
+        top=max(available.top()+10,min(main_rect.top(),available.bottom()-dialog.height()-10))
+        if right_space>=dialog.width()+gap:dialog.move(main_rect.right()+gap,top); return
+        if left_space>=dialog.width()+gap:dialog.move(main_rect.left()-dialog.width()-gap,top); return
+        for screen in screens:
+            if screen is current:continue
+            target=screen.availableGeometry()
+            if target.width()>=dialog.width()+20 and target.height()>=dialog.height()+20:dialog.move(target.left()+10,target.top()+10); return
+        total=main_rect.width()+gap+dialog.width()
+        if total>available.width()-20:
+            target_main=max(self.minimumWidth(),available.width()-540-gap-20)
+            if target_main<main_rect.width():self.resize(target_main,min(self.height(),available.height()-20)); QApplication.processEvents(); main_rect=self.frameGeometry()
+            dialog.resize(max(400,available.width()-main_rect.width()-gap-20),dialog.height()); total=main_rect.width()+gap+dialog.width()
+        if total<=available.width()-20:
+            pair_left=available.left()+max(10,(available.width()-total)//2); main_top=max(available.top()+10,min(main_rect.top(),available.bottom()-main_rect.height()-10)); self.move(pair_left,main_top); dialog.move(pair_left+main_rect.width()+gap,top); return
+        dialog.move(available.right()-dialog.width()-10,top)
     def release_tutor_dialog(self,dialog):
         if dialog in self.tutor_dialogs:self.tutor_dialogs.remove(dialog)
         dialog.deleteLater()
