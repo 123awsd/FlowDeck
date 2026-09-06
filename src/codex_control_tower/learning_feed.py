@@ -12,9 +12,10 @@ from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-BASE=Path(__file__).resolve().parent
-DB=BASE/"learning.db"
-PREFERENCES_PATH=BASE/"learning_preferences.json"
+from .paths import CONFIG_DIR, DATA_DIR, ENV_FILE
+
+DB=DATA_DIR/"learning.db"
+PREFERENCES_PATH=CONFIG_DIR/"learning_preferences.json"
 ENGINE_VERSION=2
 CHANNEL_LABELS={"core":"核心关注","adjacent":"相邻方向","major":"重大更新","emerging":"新趋势","serendipity":"探索发现"}
 OPEN_TOPIC_RULES={
@@ -33,7 +34,7 @@ def _number(value,default=0.0):
 def _env(name):
     if os.environ.get(name):return os.environ[name]
     try:
-        for line in (BASE/".env").read_text(encoding="utf-8").splitlines():
+        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
             key,sep,value=line.partition("=")
             if sep and key.strip()==name:return value.strip().strip('"').strip("'")
     except Exception:pass

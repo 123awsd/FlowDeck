@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from learning_feed import Store, _soft_allocate, load_preferences, merge_events, score_event
+from codex_control_tower.learning_feed import Store, _soft_allocate, load_preferences, merge_events, score_event
 
 
 class RecommendationTests(unittest.TestCase):

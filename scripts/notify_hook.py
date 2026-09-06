@@ -2,7 +2,7 @@
 """Write a Codex turn event for Control Tower.
 
 Usage example:
-  python3 notify_hook.py --task-id 3 --status Ready --summary "测试已完成"
+  python3 scripts/notify_hook.py --task-id 3 --status Ready --summary "测试已完成"
 
 The task ID and status can also be provided in a JSON object on stdin.
 """
@@ -14,7 +14,9 @@ from datetime import datetime
 from pathlib import Path
 
 
-EVENT_FILE = Path(__file__).resolve().parent / "events.jsonl"
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+EVENT_FILE = DATA_DIR / "events.jsonl"
 STATUSES = {"Running", "Needs input", "Ready", "Blocked", "Done"}
 
 

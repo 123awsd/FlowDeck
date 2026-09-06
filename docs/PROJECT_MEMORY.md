@@ -14,13 +14,13 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 
 | 子系统 | 状态 | 当前责任 | 主要文件 |
 | --- | --- | --- | --- |
-| 悬浮窗与导航 | 已实现 | 置顶悬浮球、展开/收起、四个主页面 | `app_qt.py` |
-| VS Code 窗口监控 | 已实现 | 自动发现本地和 SSH 窗口、项目、运行/完成状态、待查看提醒和聚焦 | `app_qt.py`、`vscode-bridge/`、`remote-monitor/` |
-| 账号与额度 | 已实现 | 读取 Codex Switch 账号和额度周期，过滤无额度账号，切换后聚焦目标窗口 | `app_qt.py`、`vscode-bridge/` |
-| 今日待办 | 已实现 | 本地待办、优先级、当日完成进度、系统中文输入法 | `app_qt.py` |
-| 系统监控 | 已实现 | CPU、内存、Swap、GPU/显存、网络、磁盘和高占用进程 | `system_monitor.py`、`app_qt.py` |
-| 前沿追踪 | 已实现 | 具身智能宽召回、质量门槛、五通道推荐、视频、反馈和有界存储 | `learning_feed.py`、`learning_preferences.json`、`app_qt.py` |
-| 系统学习 | 计划 | 按冻结的 VLA/VLN/WAM Curriculum 长期学习和记录掌握度 | `docs/LEARNING_SYSTEM.md` |
+| 悬浮窗与导航 | 已实现 | 置顶悬浮球、展开/收起、四个主页面 | `src/codex_control_tower/ui.py` |
+| VS Code 窗口监控 | 已实现 | 自动发现本地和 SSH 窗口、项目、运行/完成状态、待查看提醒和聚焦 | `src/codex_control_tower/ui.py`、`extensions/vscode-bridge/`、`extensions/remote-monitor/` |
+| 账号与额度 | 已实现 | 读取 Codex Switch 账号和额度周期，过滤无额度账号，切换后聚焦目标窗口 | `src/codex_control_tower/ui.py`、`extensions/vscode-bridge/` |
+| 今日待办 | 已实现 | 本地待办、优先级、当日完成进度、系统中文输入法 | `src/codex_control_tower/ui.py` |
+| 系统监控 | 已实现 | CPU、内存、Swap、GPU/显存、网络、磁盘和高占用进程 | `src/codex_control_tower/system_monitor.py`、`src/codex_control_tower/ui.py` |
+| 前沿追踪 | 已实现 | 具身智能宽召回、质量门槛、五通道推荐、视频、反馈和有界存储 | `src/codex_control_tower/learning_feed.py`、`config/learning_preferences.json`、`src/codex_control_tower/ui.py` |
+| 系统学习 | 基础版已实现 | 已导入 VLA reviewed draft，支持路线、框架审查门禁、进度、知识点状态和来源；微卡正文待框架冻结后生成 | `src/codex_control_tower/curriculum.py`、`learning/domains/vla/`、`docs/LEARNING_SYSTEM.md` |
 
 ## 稳定产品决定
 
@@ -56,19 +56,20 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 
 ## 数据与增长边界
 
-- `tasks.json`、`daily_todos.json`、`seen_sessions.json`、`learning.db` 等个人运行状态不进入 Git。
+- `data/tasks.json`、`data/daily_todos.json`、`data/seen_sessions.json`、`data/learning.db` 等个人运行状态不进入 Git。
 - 前沿内容普通记录保留 60 天且总数受限；收藏长期保留；热度快照保留 180 天。
 - 系统学习的 Curriculum、来源和人工审查结果属于长期知识资产，可版本管理。
 - 学习进度、反馈、薄弱点和缓存属于个人运行数据，不进入 Git。
 
 ## 当前下一步
 
-1. 用户使用网页版 GPT 基于可靠资料生成 VLA 的 `sources.json`、`curriculum_v1.json`、`curriculum_v1.md` 和 `review_v1.md`。
-2. 文件返回后，先做结构、引用、重复节点与依赖环校验，再由用户人工确认。
-3. 确认后冻结 VLA Curriculum v1，建立 `learning/` 数据目录并接入“系统学习”页面。
-4. 验证 VLA 流程后，再复用同一 pipeline 增加 VLN 和 WAM。
+1. VLA 四份交付物已经导入并通过结构、引用、重复节点与依赖环校验。
+2. 用户从“系统学习”打开完整框架和审查报告，人工检查关键取舍后点击“确认启用 v1”。
+3. 确认后冻结 VLA Curriculum v1，再生成和抽检第一批 3～5 分钟知识卡正文。
+4. 验证 VLA 学习体验后，复用同一 pipeline 增加 VLN 和 WAM。
 
 ## 记忆更新记录
 
 - 2026-09-06：建立仓库级长期记忆机制；记录领域学习系统、现有功能约束与后续 VLA 交付流程。
-
+- 2026-09-06：按源码、配置、运行数据、测试、扩展和打包资源重新整理仓库；根目录 `launch.sh` 保持为稳定入口。
+- 2026-09-06：导入网页版 GPT 生成的 VLA v1（18 个来源、7 个模块、39 个节点）；自动校验通过，并加入系统学习预览、路线和本地进度功能，暂不替用户冻结框架。

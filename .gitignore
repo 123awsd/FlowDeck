@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 
 # Local runtime state (may contain project paths and personal todos)
+data/*
+!data/README.md
 tasks.json
 daily_todos.json
 seen_sessions.json
@@ -12,6 +14,8 @@ learning_state.json
 learning.db*
 
 # Generated extension packages and accidental window dumps
+dist/*
+!dist/README.md
 *.vsix
 0x[0-9A-Fa-f]*
 

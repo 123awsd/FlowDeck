@@ -6,8 +6,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote, urlparse
-from learning_feed import PREFERENCES_PATH, Store as LearningStore, build_feed as build_learning_feed_v2, context_profile
-from system_monitor import SystemMonitor
+from .curriculum import CurriculumLibrary, CurriculumStore, PATH_LABELS, STATE_LABELS
+from .learning_feed import PREFERENCES_PATH, Store as LearningStore, build_feed as build_learning_feed_v2, context_profile
+from .paths import ASSETS_DIR, DATA_DIR, PROJECT_ROOT
+from .system_monitor import SystemMonitor
 try:
     from PySide6.QtCore import Qt, QTimer
     from PySide6.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPen
@@ -17,10 +19,10 @@ except ImportError:
     from PyQt5.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPen
     from PyQt5.QtWidgets import *
 
-BASE=Path(__file__).resolve().parent; DATA=BASE/"tasks.json"; TODOS_FILE=BASE/"daily_todos.json"; EVENTS=BASE/"events.jsonl"
+BASE=PROJECT_ROOT; DATA=DATA_DIR/"tasks.json"; TODOS_FILE=DATA_DIR/"daily_todos.json"; EVENTS=DATA_DIR/"events.jsonl"
 PROFILE_FILE=Path.home()/".config/Code/User/globalStorage/woozy-masta.codex-switch/profiles.json"
 GLOBAL_DB=Path.home()/".config/Code/User/globalStorage/state.vscdb"
-SEEN_FILE=BASE/"seen_sessions.json"
+SEEN_FILE=DATA_DIR/"seen_sessions.json"
 BRIDGE_DIR=Path.home()/".codex-window-manager"
 STATES=["Running","Needs input","Ready","Blocked","Done"]
 LABELS=dict(zip(STATES,["执行中","需要输入","已就绪","已阻塞","已完成"]))
@@ -308,10 +310,18 @@ class DraggableHeader(QFrame):
 
 class App(QWidget):
     def __init__(self):
-        super().__init__(); self.tasks=self.load(); self.todos=self.load_todos(); self.view_mode="monitor"; self.windows=[]; self.expanded=False; self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}; self.feed_error=""; self.feed_future=None; self.feed_executor=ThreadPoolExecutor(max_workers=1); self.feed_store=LearningStore(); self.feed_display_limit=6; self.feed_items=self.feed_store.recent(self.feed_display_limit); self.feed_stats=self.feed_store.stats(); self.learning_context={"label":"具身智能前沿","terms":[],"topics":[]}; self.system_monitor=SystemMonitor(); self.system_executor=ThreadPoolExecutor(max_workers=1); self.system_future=None; self.system_metrics=self.system_monitor.empty(); self.system_history={"cpu":deque(maxlen=60),"memory":deque(maxlen=60),"gpu":deque(maxlen=60),"disk":deque(maxlen=60)}
+        super().__init__()
+        self.tasks=self.load(); self.todos=self.load_todos(); self.view_mode="monitor"; self.windows=[]; self.expanded=False
+        self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}
+        self.feed_error=""; self.feed_future=None; self.feed_executor=ThreadPoolExecutor(max_workers=1)
+        self.feed_store=LearningStore(); self.feed_display_limit=6; self.feed_items=self.feed_store.recent(self.feed_display_limit); self.feed_stats=self.feed_store.stats()
+        self.learning_context={"label":"具身智能前沿","terms":[],"topics":[]}; self.learning_mode="frontier"
+        self.curriculum_library=CurriculumLibrary(); self.curriculum_store=CurriculumStore(); loaded=self.curriculum_library.domains(); preferred=self.curriculum_store.selected_domain()
+        self.curriculum_domain_id=preferred if self.curriculum_library.get(preferred) else (loaded[0]["id"] if loaded else "")
+        self.system_monitor=SystemMonitor(); self.system_executor=ThreadPoolExecutor(max_workers=1); self.system_future=None; self.system_metrics=self.system_monitor.empty(); self.system_history={"cpu":deque(maxlen=60),"memory":deque(maxlen=60),"gpu":deque(maxlen=60),"disk":deque(maxlen=60)}
         try:self.seen=json.loads(SEEN_FILE.read_text())
         except Exception:self.seen={}
-        self.setWindowTitle("Codex 任务总控台"); self.setWindowIcon(QIcon(str(BASE/"assets/codex-control-tower.svg"))); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setAttribute(Qt.WA_TranslucentBackground,True); self.setObjectName("root")
+        self.setWindowTitle("Codex 任务总控台"); self.setWindowIcon(QIcon(str(ASSETS_DIR/"codex-control-tower.svg"))); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setAttribute(Qt.WA_TranslucentBackground,True); self.setObjectName("root")
         self.setStyleSheet("QWidget{font-family:'Noto Sans CJK SC';font-size:13px;color:#172033} QWidget#root{background:transparent} QPushButton{padding:7px 13px;background:#ffffff;border:1px solid #dbe3ed;border-radius:7px} QPushButton:hover{background:#f5f7ff;border-color:#a5b4fc} QLineEdit,QComboBox{padding:7px;background:white;border:1px solid #dbe3ed;border-radius:6px} QMenu{background:white;border:1px solid #dbe3ed;border-radius:8px;padding:6px} QMenu::item{padding:8px 24px 8px 12px;border-radius:5px} QMenu::item:selected{background:#eef2ff;color:#4338ca} QProgressBar{height:6px;border:0;border-radius:3px;background:#e2e8f0;text-align:center} QProgressBar::chunk{border-radius:3px;background:#34d399}")
         self.root=QVBoxLayout(self); self.root.setContentsMargins(0,0,0,0); self.root.setSpacing(4); self.bubble=BubbleButton(); self.bubble.setFixedSize(58,58); self.bubble.setToolTip("点击展开，拖动可移动"); shadow=QGraphicsDropShadowEffect(self); shadow.setBlurRadius(18); shadow.setOffset(0,4); shadow.setColor(QColor(15,23,42,120)); self.bubble.setGraphicsEffect(shadow); self.bubble.clicked.connect(self.toggle); self.root.addWidget(self.bubble)
         self.shell=QFrame(); self.shell.setObjectName("shell"); self.shell.setStyleSheet("QFrame#shell{background:#f8fafc;border:1px solid #dbe3ed;border-radius:12px}"); shell_layout=QVBoxLayout(self.shell); shell_layout.setContentsMargins(0,0,0,0); shell_layout.setSpacing(0)
@@ -379,7 +389,12 @@ class App(QWidget):
         if self.view_mode=="monitor":
             notice=f" · {unread} 待查看" if unread else ""; self.summary.setText(f"{self.running_count} 正在运行 · {self.done_count} 已完成{notice}")
         elif self.view_mode=="todo":self.summary.setText(f"{len(active_todos)} 项待办 · 今天完成 {len(done_today)}")
-        elif self.view_mode=="learn":self.summary.setText(f"{self.running_count} 个任务运行中 · {len(self.feed_items)} 条前沿卡片")
+        elif self.view_mode=="learn":
+            bundle=self.curriculum_library.get(self.curriculum_domain_id) if self.learning_mode=="curriculum" else None
+            if bundle:
+                path=self.curriculum_library.path(bundle,self.curriculum_store.selected_path(bundle)); stats=self.curriculum_store.stats(bundle,path)
+                self.summary.setText(f"学习 {stats['mastered']}/{stats['total']}")
+            else:self.summary.setText(f"{self.running_count} 个任务运行中 · {len(self.feed_items)} 条前沿卡片")
         else:
             cpu=self.system_metrics.get("cpu",{}).get("percent",0); memory=self.system_metrics.get("memory",{}).get("percent",0); gpu=self.system_metrics.get("gpu",[]); gpu_text=f"GPU {gpu[0].get('percent',0):.0f}%" if gpu else "GPU --"
             self.summary.setText(f"CPU {cpu:.0f}% · 内存 {memory:.0f}% · {gpu_text}")
@@ -494,13 +509,19 @@ class App(QWidget):
         v.addLayout(h); self.box.addWidget(p)
     def learning_panel(self):
         panel=QFrame(); panel.setObjectName("learningPanel"); panel.setStyleSheet("QFrame#learningPanel{background:#f7f8fc;border:1px solid #e2e8f0;border-radius:11px} QLabel{background:transparent}"); v=QVBoxLayout(panel); v.setSizeConstraint(QLayout.SetMinimumSize); v.setContentsMargins(14,12,14,14); v.setSpacing(8)
-        head=QHBoxLayout(); titles=QVBoxLayout(); titles.setSpacing(0); title=QLabel("具身前沿"); title.setFont(QFont("Noto Sans CJK SC",16,QFont.Bold)); title.setStyleSheet("color:#0f172a"); titles.addWidget(title); subtitle=QLabel("兴趣只决定排序，重大更新和未知方向不会被过滤"); subtitle.setStyleSheet("color:#64748b;font-size:10px"); titles.addWidget(subtitle); head.addLayout(titles); head.addStretch()
+        curriculum_mode=self.learning_mode=="curriculum"; head=QHBoxLayout(); titles=QVBoxLayout(); titles.setSpacing(0); title=QLabel("系统学习" if curriculum_mode else "前沿追踪"); title.setFont(QFont("Noto Sans CJK SC",16,QFont.Bold)); title.setStyleSheet("color:#0f172a"); titles.addWidget(title); subtitle=QLabel("沿稳定知识框架持续推进" if curriculum_mode else "兴趣只决定排序，重大更新和未知方向不会被过滤"); subtitle.setStyleSheet("color:#64748b;font-size:10px"); titles.addWidget(subtitle); head.addLayout(titles); head.addStretch()
         needs_review=[w for w in self.windows if w.get("completed",0)>self.seen.get(w.get("path",""),0)]; state_text=f"● {self.running_count} 运行中 · {len(needs_review)} 待处理"; state=QLabel(state_text); state.setStyleSheet(f"color:{'#b91c1c' if needs_review else '#1d4ed8'};background:{'#fee2e2' if needs_review else '#dbeafe'};padding:4px 9px;border-radius:6px;font-weight:700"); head.addWidget(state); v.addLayout(head)
         if needs_review:
             alert=QFrame(); alert.setObjectName("workAlert"); alert.setStyleSheet("QFrame#workAlert{background:#fff1f2;border:1px solid #fda4af;border-radius:9px} QLabel{background:transparent}"); alerts=QVBoxLayout(alert); alerts.setContentsMargins(11,8,9,8); label=QLabel(f"有 {len(needs_review)} 个 Codex 任务已经完成，需要你处理"); label.setStyleSheet("color:#9f1239;font-weight:700"); alerts.addWidget(label)
             for window in needs_review:
                 row=QHBoxLayout(); name=QLabel(window.get("folder","未命名项目")); name.setStyleSheet("color:#1e293b;font-weight:600"); row.addWidget(name,1); view=QPushButton("立即查看"); view.setStyleSheet("background:#dc2626;color:white;border:0;font-weight:700"); view.clicked.connect(lambda _,x=window:self.focus(x["id"])); row.addWidget(view); alerts.addLayout(row)
             v.addWidget(alert)
+        mode_bar=QFrame(); mode_bar.setObjectName("learningModeBar"); mode_bar.setStyleSheet("QFrame#learningModeBar{background:#eef2f7;border:0;border-radius:9px}"); mode_row=QHBoxLayout(mode_bar); mode_row.setContentsMargins(4,4,4,4); mode_row.setSpacing(4)
+        for mode,label in (("frontier","前沿追踪"),("curriculum","系统学习")):
+            button=QPushButton(label); active=self.learning_mode==mode; button.setStyleSheet("background:white;color:#3730a3;border:1px solid #dbe3ed;font-weight:700" if active else "background:transparent;color:#64748b;border:0"); button.clicked.connect(lambda _,value=mode:self.switch_learning_mode(value)); mode_row.addWidget(button)
+        mode_row.addStretch(); mode_hint=QLabel("固定框架 · 本地进度" if curriculum_mode else "动态发现 · 有界推荐"); mode_hint.setStyleSheet("color:#94a3b8;font-size:9px;padding-right:6px"); mode_row.addWidget(mode_hint); v.addWidget(mode_bar)
+        if curriculum_mode:
+            self.curriculum_panel(v,panel); return
         control_bar=QFrame(); control_bar.setObjectName("learningControls"); control_bar.setStyleSheet("QFrame#learningControls{background:white;border:1px solid #e2e8f0;border-radius:8px}"); controls=QHBoxLayout(control_bar); controls.setContentsMargins(9,6,8,6); hint=QLabel("宽召回 · 质量门槛 · "+self.learning_context.get("label","具身智能前沿")); hint.setStyleSheet("color:#475569;font-size:10px"); controls.addWidget(hint); controls.addStretch(); settings=QPushButton("推荐设置"); settings.setToolTip("打开 learning_preferences.json"); settings.clicked.connect(self.open_learning_preferences); controls.addWidget(settings); duration_label=QLabel("时长"); duration_label.setStyleSheet("color:#64748b;font-size:10px"); controls.addWidget(duration_label)
         duration=QComboBox(); duration.addItem("3 分钟",3); duration.addItem("5 分钟",5); duration.addItem("10 分钟",10); duration.addItem("20 分钟",20); duration.setCurrentIndex(duration.findData(getattr(self,"learning_minutes",5))); duration.currentIndexChanged.connect(lambda:self.set_learning_minutes(duration.currentData())); controls.addWidget(duration)
         refresh=QPushButton("获取最新"); refresh.setEnabled(not (self.feed_future and not self.feed_future.done())); refresh.setStyleSheet("background:#4f46e5;color:white;border:0;font-weight:700"); refresh.clicked.connect(self.start_learning_feed); controls.addWidget(refresh); v.addWidget(control_bar)
@@ -539,6 +560,86 @@ class App(QWidget):
             feedback.setMenu(feedback_menu); bottom.addWidget(feedback); c.addLayout(bottom); v.addWidget(card)
         stats=self.feed_stats; storage=QLabel(f"有界存储：{stats.get('count',0)}/{stats.get('limit',1000)} 条 · 收藏 {stats.get('saved',0)} · {stats.get('bytes',0)/1024/1024:.1f} MB · 内容保留 60 天，热度快照保留 180 天"); storage.setAlignment(Qt.AlignCenter); storage.setStyleSheet("color:#64748b;font-size:10px;padding:6px"); v.addWidget(storage)
         self.box.addWidget(panel)
+    def switch_learning_mode(self,mode):
+        if mode not in ("frontier","curriculum") or self.learning_mode==mode:return
+        self.learning_mode=mode; self.refresh()
+    def curriculum_panel(self,v,panel):
+        bundle=self.curriculum_library.get(self.curriculum_domain_id)
+        if not bundle:
+            empty=QLabel("还没有导入可用的系统学习路线"); empty.setAlignment(Qt.AlignCenter); empty.setStyleSheet("color:#64748b;background:white;padding:30px;border-radius:9px"); v.addWidget(empty); self.box.addWidget(panel); return
+        path_name=self.curriculum_store.selected_path(bundle); path=self.curriculum_library.path(bundle,path_name); current_id=self.curriculum_store.current(bundle,path); concept=bundle["concept_by_id"].get(current_id)
+        stats=self.curriculum_store.stats(bundle,path); approved=self.curriculum_store.approved(bundle); domain=bundle["domain"]
+
+        controls=QFrame(); controls.setObjectName("curriculumControls"); controls.setStyleSheet("QFrame#curriculumControls{background:white;border:1px solid #e2e8f0;border-radius:9px}"); row=QHBoxLayout(controls); row.setContentsMargins(9,6,8,6); row.setSpacing(6)
+        loaded={item["id"]:item for item in self.curriculum_library.domains()}
+        for domain_id,label in (("vla","VLA"),("vln","VLN"),("wam","WAM")):
+            route=QPushButton(label if domain_id in loaded else f"{label} · 待导入"); route.setEnabled(domain_id in loaded); active=domain_id==self.curriculum_domain_id; route.setStyleSheet("background:#4f46e5;color:white;border:0;font-weight:700" if active else "background:#f8fafc;color:#64748b;border:1px solid #e2e8f0"); route.clicked.connect(lambda _,value=domain_id:self.select_curriculum_domain(value)); row.addWidget(route)
+        row.addStretch(); path_select=QComboBox()
+        for key,label in PATH_LABELS.items():path_select.addItem(label,key)
+        path_select.setCurrentIndex(max(0,path_select.findData(path_name))); path_select.currentIndexChanged.connect(lambda:self.select_curriculum_path(path_select.currentData())); row.addWidget(path_select)
+        outline=QPushButton("查看完整框架"); outline.clicked.connect(lambda:self.open_curriculum_document("curriculum")); row.addWidget(outline); review=QPushButton("审查报告"); review.clicked.connect(lambda:self.open_curriculum_document("review")); row.addWidget(review); v.addWidget(controls)
+
+        counts=bundle["validation"].get("counts",{}); approval=QFrame(); approval.setObjectName("approvalState"); approval.setStyleSheet(f"QFrame#approvalState{{background:{'#ecfdf5' if approved else '#fffbeb'};border:1px solid {'#a7f3d0' if approved else '#fde68a'};border-radius:8px}} QLabel{{background:transparent}}"); approval_row=QHBoxLayout(approval); approval_row.setContentsMargins(10,7,8,7); approval_text=QLabel(("✓ 已确认启用 · 进度仅保存在本机" if approved else f"结构校验已通过 · {counts.get('modules',0)} 个模块、{counts.get('concepts',0)} 个节点 · 框架仍待你人工确认")); approval_text.setStyleSheet(f"color:{'#047857' if approved else '#92400e'};font-size:10px;font-weight:700"); approval_row.addWidget(approval_text,1)
+        if not approved:
+            confirm=QPushButton("确认启用 v1"); confirm.setStyleSheet("background:#d97706;color:white;border:0;font-weight:700"); confirm.clicked.connect(self.approve_curriculum); approval_row.addWidget(confirm)
+        v.addWidget(approval)
+
+        progress_box=QFrame(); progress_box.setObjectName("curriculumProgress"); progress_box.setStyleSheet("QFrame#curriculumProgress{background:#eef2ff;border:1px solid #dbeafe;border-radius:9px} QLabel{background:transparent}"); progress_layout=QVBoxLayout(progress_box); progress_layout.setContentsMargins(11,8,11,9); progress_layout.setSpacing(5); progress_top=QHBoxLayout(); route_title=QLabel(f"{domain.get('name_zh','VLA')} · {PATH_LABELS.get(path_name,path_name)}"); route_title.setStyleSheet("color:#312e81;font-weight:700"); progress_top.addWidget(route_title); progress_top.addStretch(); progress_number=QLabel(f"已理解 {stats['mastered']}/{stats['total']} · {stats['percent']}%"); progress_number.setStyleSheet("color:#4338ca;font-size:10px;font-weight:700"); progress_top.addWidget(progress_number); progress_layout.addLayout(progress_top); progress_bar=QProgressBar(); progress_bar.setTextVisible(False); progress_bar.setRange(0,100); progress_bar.setValue(stats["percent"]); progress_bar.setStyleSheet("QProgressBar{height:7px;border:0;border-radius:3px;background:#dbeafe} QProgressBar::chunk{background:#6366f1;border-radius:3px}"); progress_layout.addWidget(progress_bar); v.addWidget(progress_box)
+
+        if concept:
+            modules={item["id"]:item for item in bundle["modules"]}; module=modules.get(concept.get("module_id"),{}); position=path.index(current_id)+1 if current_id in path else 1; state=self.curriculum_store.state(bundle,current_id)
+            card=QFrame(); card.setObjectName("conceptCard"); card.setStyleSheet("QFrame#conceptCard{background:white;border:1px solid #dbe3ed;border-left:4px solid #6366f1;border-radius:10px} QLabel{background:transparent;border:0}"); card_layout=QVBoxLayout(card); card_layout.setContentsMargins(14,11,14,12); card_layout.setSpacing(8)
+            badges=QHBoxLayout(); module_badge=QLabel(module.get("title_zh","VLA")); module_badge.setStyleSheet("color:#4338ca;background:#eef2ff;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(module_badge); priority=QLabel(concept.get("priority","P1")); priority.setStyleSheet("color:#b45309;background:#fef3c7;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(priority); stability_labels={"foundation":"稳定基础","evolving":"持续演进","frontier":"前沿扩展"}; stability=QLabel(stability_labels.get(concept.get("stability"),concept.get("stability",""))); stability.setStyleSheet("color:#0369a1;background:#e0f2fe;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(stability); state_badge=QLabel(STATE_LABELS.get(state,"未学习")); state_badge.setStyleSheet("color:#047857;background:#ecfdf5;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(state_badge); badges.addStretch(); number=QLabel(f"第 {position}/{len(path)} 项 · {concept.get('estimated_card_minutes',4)} 分钟"); number.setStyleSheet("color:#64748b;font-size:9px"); badges.addWidget(number); card_layout.addLayout(badges)
+            concept_title=QLabel(concept.get("title_zh","未命名知识点")); concept_title.setFont(QFont("Noto Sans CJK SC",17,QFont.Bold)); concept_title.setStyleSheet("color:#0f172a"); card_layout.addWidget(concept_title); english=QLabel(concept.get("title_en","")); english.setStyleSheet("color:#64748b;font-size:10px"); card_layout.addWidget(english)
+            scope=QLabel("学习边界\n"+concept.get("scope","")); scope.setWordWrap(True); scope.setTextInteractionFlags(Qt.TextSelectableByMouse); scope.setStyleSheet("color:#334155;background:#f8fafc;padding:9px;border-radius:7px;font-size:11px"); card_layout.addWidget(scope)
+            reason=QLabel("为什么重要\n"+concept.get("priority_reason","")); reason.setWordWrap(True); reason.setStyleSheet("color:#4338ca;font-size:10px"); card_layout.addWidget(reason)
+            goals=concept.get("learning_goals",[]); goal_text="掌握目标\n"+"\n".join(f"• {item}" for item in goals); goal=QLabel(goal_text); goal.setWordWrap(True); goal.setTextInteractionFlags(Qt.TextSelectableByMouse); goal.setStyleSheet("color:#334155;font-size:10px"); card_layout.addWidget(goal)
+            prerequisites=[bundle["concept_by_id"].get(item,{}).get("title_zh",item) for item in concept.get("prerequisites",[])]; related=[bundle["concept_by_id"].get(item,{}).get("title_zh",item) for item in concept.get("related_concepts",[])]; relations=QLabel("前置："+("、".join(prerequisites) if prerequisites else "无")+"\n相邻："+("、".join(related[:5]) if related else "无")); relations.setWordWrap(True); relations.setStyleSheet("color:#64748b;background:#f8fafc;padding:7px;border-radius:6px;font-size:9px"); card_layout.addWidget(relations)
+            keywords=QLabel("论文关键词："+" · ".join(concept.get("recognition_keywords",[])[:8])); keywords.setWordWrap(True); keywords.setStyleSheet("color:#0369a1;font-size:9px"); card_layout.addWidget(keywords); works=QLabel("代表工作："+" · ".join(concept.get("representative_works",[])[:6])); works.setWordWrap(True); works.setStyleSheet("color:#475569;font-size:9px"); card_layout.addWidget(works)
+            bottom=QHBoxLayout(); previous=QPushButton("← 上一个"); previous.setEnabled(position>1); previous.clicked.connect(lambda:self.navigate_curriculum(-1)); bottom.addWidget(previous); sources=QToolButton(); source_ids=concept.get("source_ids",[]); sources.setText(f"学习来源 {len(source_ids)}  ▾"); sources.setPopupMode(QToolButton.InstantPopup); sources.setStyleSheet("QToolButton{padding:7px 10px;background:white;color:#475569;border:1px solid #dbe3ed;border-radius:7px} QToolButton::menu-indicator{image:none}"); source_menu=QMenu(sources)
+            for source_id in source_ids:
+                source=bundle["source_by_id"].get(source_id,{}); action=source_menu.addAction(f"{source.get('type','资料')} · {source.get('title',source_id)[:64]}"); action.triggered.connect(lambda _,url=source.get("url",""):self.open_external_url(url))
+            sources.setMenu(source_menu); bottom.addWidget(sources); bottom.addStretch(); unclear=QPushButton("还不清楚"); unclear.setEnabled(approved); unclear.setToolTip("先确认启用当前框架" if not approved else "保留在当前节点并加入复习"); unclear.clicked.connect(lambda:self.mark_curriculum_state("learning",False)); bottom.addWidget(unclear); deep=QPushButton("稍后深入"); deep.setEnabled(approved); deep.setToolTip("先确认启用当前框架" if not approved else "完成基础了解并加入深入队列"); deep.setStyleSheet("background:#eef2ff;color:#4338ca;border:0"); deep.clicked.connect(lambda:self.mark_curriculum_state("deep",True)); bottom.addWidget(deep); understood=QPushButton("已理解，下一项"); understood.setEnabled(approved); understood.setToolTip("先确认启用当前框架" if not approved else "记录进度并继续"); understood.setStyleSheet("background:#4f46e5;color:white;border:0;font-weight:700"); understood.clicked.connect(lambda:self.mark_curriculum_state("understood",True)); bottom.addWidget(understood); card_layout.addLayout(bottom); v.addWidget(card)
+
+        map_box=QFrame(); map_box.setObjectName("curriculumMap"); map_box.setStyleSheet("QFrame#curriculumMap{background:white;border:1px solid #e2e8f0;border-radius:9px} QLabel{background:transparent}"); map_layout=QVBoxLayout(map_box); map_layout.setContentsMargins(11,9,11,10); map_title=QLabel("路线概览"); map_title.setStyleSheet("color:#0f172a;font-weight:700"); map_layout.addWidget(map_title)
+        for module in sorted(bundle["modules"],key=lambda item:item.get("order",0)):
+            module_path=[item for item in path if item in module.get("concept_ids",[])]; mastered=sum(self.curriculum_store.state(bundle,item) in {"understood","deep"} for item in module_path); module_row=QHBoxLayout(); module_name=QLabel(module.get("title_zh",module.get("id",""))); module_name.setMinimumWidth(180); module_name.setStyleSheet("color:#334155;font-size:10px"); module_row.addWidget(module_name); module_progress=QProgressBar(); module_progress.setTextVisible(False); module_progress.setRange(0,100); module_progress.setValue(round(mastered/len(module_path)*100) if module_path else 0); module_progress.setFixedHeight(5); module_row.addWidget(module_progress,1); module_count=QLabel(f"{mastered}/{len(module_path)}"); module_count.setMinimumWidth(36); module_count.setAlignment(Qt.AlignRight|Qt.AlignVCenter); module_count.setStyleSheet("color:#64748b;font-size:9px"); module_row.addWidget(module_count); jump=QPushButton("继续"); jump.setEnabled(bool(module_path)); jump.setStyleSheet("padding:4px 9px;font-size:9px"); target=next((item for item in module_path if self.curriculum_store.state(bundle,item) not in {"understood","deep"}),module_path[0] if module_path else ""); jump.clicked.connect(lambda _,concept_id=target:self.select_curriculum_concept(concept_id)); module_row.addWidget(jump); map_layout.addLayout(module_row)
+        v.addWidget(map_box); self.box.addWidget(panel)
+    def current_curriculum(self):
+        bundle=self.curriculum_library.get(self.curriculum_domain_id)
+        if not bundle:return None,[],None
+        path=self.curriculum_library.path(bundle,self.curriculum_store.selected_path(bundle)); return bundle,path,self.curriculum_store.current(bundle,path)
+    def select_curriculum_domain(self,domain_id):
+        if not self.curriculum_library.get(domain_id):return
+        self.curriculum_domain_id=domain_id; self.curriculum_store.select_domain(domain_id); self.refresh()
+    def select_curriculum_path(self,path_name):
+        bundle=self.curriculum_library.get(self.curriculum_domain_id)
+        if bundle and path_name in PATH_LABELS:self.curriculum_store.select_path(bundle,path_name); self.refresh()
+    def select_curriculum_concept(self,concept_id):
+        bundle,path,_=self.current_curriculum()
+        if bundle and concept_id in path:self.curriculum_store.set_current(bundle,concept_id); self.refresh()
+    def navigate_curriculum(self,step):
+        bundle,path,current=self.current_curriculum()
+        if not bundle or current not in path:return
+        index=max(0,min(len(path)-1,path.index(current)+step)); self.curriculum_store.set_current(bundle,path[index]); self.refresh()
+    def mark_curriculum_state(self,state,advance):
+        bundle,path,current=self.current_curriculum()
+        if not bundle or not current:return
+        self.curriculum_store.set_state(bundle,current,state)
+        if advance:self.curriculum_store.advance(bundle,path,current)
+        self.refresh()
+    def approve_curriculum(self):
+        bundle=self.curriculum_library.get(self.curriculum_domain_id)
+        if not bundle:return
+        result=QMessageBox.question(self,"确认启用课程",f"确认你已经检查过 {bundle['domain'].get('name_zh','当前')} {bundle['domain'].get('version','v1')} 的框架，并将它作为系统学习路线吗？\n\n这只记录本机确认状态，不会自动修改课程内容。",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        if result==QMessageBox.Yes:self.curriculum_store.approve(bundle); self.refresh()
+    def open_curriculum_document(self,kind):
+        bundle=self.curriculum_library.get(self.curriculum_domain_id)
+        if not bundle:return
+        path=bundle.get("review_path" if kind=="review" else "readable_path")
+        if path and Path(path).exists():subprocess.Popen(["xdg-open",str(path)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    def open_external_url(self,url):
+        if url:subprocess.Popen(["xdg-open",url],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     def set_learning_minutes(self,value):self.learning_minutes=int(value or 5)
     def start_learning_feed(self):
         if self.feed_future and not self.feed_future.done():return
@@ -709,4 +810,4 @@ class App(QWidget):
 def main():
     app=QApplication(sys.argv); app.setApplicationName("codex-control-tower"); app.setApplicationDisplayName("Codex 任务总控台");
     if hasattr(app,"setDesktopFileName"):app.setDesktopFileName("codex-control-tower")
-    app.setWindowIcon(QIcon(str(BASE/"assets/codex-control-tower.svg"))); app.setFont(QFont("Noto Sans CJK SC",13)); w=App(); w.show(); sys.exit(app.exec() if hasattr(app,"exec") else app.exec_())
+    app.setWindowIcon(QIcon(str(ASSETS_DIR/"codex-control-tower.svg"))); app.setFont(QFont("Noto Sans CJK SC",13)); w=App(); w.show(); sys.exit(app.exec() if hasattr(app,"exec") else app.exec_())

@@ -6,6 +6,23 @@
 
 项目的长期产品约束、当前功能地图和后续事项记录在 [`docs/PROJECT_MEMORY.md`](docs/PROJECT_MEMORY.md)。领域学习系统的完整 pipeline 记录在 [`docs/LEARNING_SYSTEM.md`](docs/LEARNING_SYSTEM.md)。根目录的 `AGENTS.md` 会提醒新的 Codex 会话先读取这些文档，并要求重要决定不能只留在聊天记录中。
 
+## 目录结构
+
+```text
+codex管理/
+├── src/codex_control_tower/  # 正式 Python 应用
+├── config/                   # 可编辑配置
+├── data/                     # 本地运行数据（Git 忽略）
+├── tests/                    # 自动化测试
+├── extensions/               # 本地/远程 VS Code 扩展
+├── learning/                 # 版本化领域知识资产
+├── scripts/                  # 通知钩子等辅助入口
+├── packaging/                # 桌面启动文件
+├── assets/                   # 图标资源
+├── docs/                     # 长期设计与项目记忆
+└── launch.sh                 # 保持稳定的启动入口
+```
+
 ## 启动
 
 ```bash
@@ -16,15 +33,19 @@
 
 ## 等待学习
 
-“等待学习”会按 3、5、10 或 20 分钟生成有边界的具身智能前沿学习包。候选池宽召回 arXiv 机器人论文、GitHub 代码库、Hugging Face 模型和 Google DeepMind / Boston Dynamics / NVIDIA Developer 官方 Demo，再用范围相关度和质量门槛去掉普通行业应用、低信号模型和不相关的泛机器人内容。系统不再强制凑齐论文、视频和模型；当天没有足够好的内容时会少显示。
+“等待学习”分成“前沿追踪”和“系统学习”两个模式。
+
+“前沿追踪”会按 3、5、10 或 20 分钟生成有边界的具身智能前沿学习包。候选池宽召回 arXiv 机器人论文、GitHub 代码库、Hugging Face 模型和 Google DeepMind / Boston Dynamics / NVIDIA Developer 官方 Demo，再用范围相关度和质量门槛去掉普通行业应用、低信号模型和不相关的泛机器人内容。系统不再强制凑齐论文、视频和模型；当天没有足够好的内容时会少显示。
 
 合格候选会同时计算 `Core / Adjacent / Major / Emerging / Serendipity` 五个通道得分，再在全局候选池中进行软分配、去重和多样性重排。兴趣只决定排序，不决定候选资格；来自重点团队、具有多来源证据或热度上升的未知方向仍可进入 `Major / Emerging / Serendipity`。论文、代码、模型和 Demo 如果属于同一项工作，会合并为一张研究事件卡。
 
-推荐偏好保存在可直接编辑的 `learning_preferences.json` 中，包括兴趣与知识程度、近期兴趣有效期、参照工作、五通道比例、视频偏好和质量门槛。程序不会自动覆盖这个人工配置。学习页的“推荐设置”按钮可以直接打开它。
+推荐偏好保存在可直接编辑的 `config/learning_preferences.json` 中，包括兴趣与知识程度、近期兴趣有效期、参照工作、五通道比例、视频偏好和质量门槛。程序不会自动覆盖这个人工配置。学习页的“推荐设置”按钮可以直接打开它。
 
 本地文件夹名和对话标题只用来得到抽象主题标识，并且只作为弱加分；原始路径和对话标题不会发给 DeepSeek。DeepSeek 只负责根据已选候选生成简体中文的摘要、增量和价值判断，不负责决定世界上哪些内容可以进入候选池。
 
-学习历史、反馈和热度快照保存在本地 `learning.db` 中。URL 自动去重，可标记“多推类似、不感兴趣、太基础、太难”；不感兴趣的条目只会隐藏而不会破坏反馈历史。未收藏内容最多保留 1000 条且 60 天后自动清理，热度快照保留 180 天，收藏内容一直保留。
+学习历史、反馈和热度快照保存在本地 `data/learning.db` 中。URL 自动去重，可标记“多推类似、不感兴趣、太基础、太难”；不感兴趣的条目只会隐藏而不会破坏反馈历史。未收藏内容最多保留 1000 条且 60 天后自动清理，热度快照保留 180 天，收藏内容一直保留。
+
+“系统学习”读取 `learning/domains/` 中经过版本管理的 Curriculum。目前已导入 VLA v1：18 个来源、7 个模块、39 个节点，支持核心/标准/研究路线、进度、知识点状态、来源跳转和模块概览。框架当前保持 `reviewed_draft`，可以预览；只有你阅读完整框架和审查报告后点击“确认启用 v1”，本机才会记录为已确认。学习进度保存在 `data/curriculum_progress.json`，不会进入 Git。
 
 ## 系统监控
 
@@ -42,7 +63,7 @@ DEEPSEEK_API_KEY=你的密钥
 `workspaceStorage` 自动显示项目文件夹和绝对路径（例如 `/home/uav/map_VLN`）。
 “聚焦”可以直接切换到对应窗口，“建任务”会自动把该窗口绑定到一条任务。
 
-每个窗口卡片还提供账号菜单。先选择目标账号，卡片会显示“待切换”，再点击“切换并聚焦”即可完成切换。首次安装 `vscode-bridge` 后，需要让每个
+每个窗口卡片还提供账号菜单。先选择目标账号，卡片会显示“待切换”，再点击“切换并聚焦”即可完成切换。首次安装 `extensions/vscode-bridge` 后，需要让每个
 已打开的 VS Code 窗口执行一次“开发人员: 重新加载窗口”；之后面板会让目标窗口调用
 Codex Switch、重启该窗口的扩展宿主，并重新打开 Codex 侧栏。
 
@@ -52,12 +73,12 @@ Codex Switch、重启该窗口的扩展宿主，并重新打开 Codex 侧栏。
 
 ## 状态
 
-按钮会按 `Running → Needs input → Ready → Blocked → Done` 循环切换。数据保存在同目录的 `tasks.json`，不会接触任何账号密码、Cookie 或 token。
+按钮会按 `Running → Needs input → Ready → Blocked → Done` 循环切换。数据保存在 `data/tasks.json`，不会接触任何账号密码、Cookie 或 token。
 
 ## 状态说明
 
 系统进程数量可以自动统计；Codex 每条任务的“需要输入/已完成”等精确状态，需要在 Codex
-配置中接入 `notify_hook.py`（见该文件顶部说明），或者直接点击任务卡片上的“状态”按钮。
+配置中接入 `scripts/notify_hook.py`（见该文件顶部说明），或者直接点击任务卡片上的“状态”按钮。
 
 ## 下一步可扩展
 

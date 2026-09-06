@@ -1,0 +1,367 @@
+{
+  "schema_version": 1,
+  "domain": "vla",
+  "retrieved_at": "2026-09-06",
+  "sources": [
+    {
+      "id": "survey_ma_2026",
+      "title": "A Survey on Vision-Language-Action Models for Embodied AI",
+      "authors": [
+        "Yueen Ma",
+        "Zixing Song",
+        "Yuzheng Zhuang",
+        "Jianye Hao",
+        "Irwin King"
+      ],
+      "year": 2026,
+      "type": "survey",
+      "url": "https://arxiv.org/abs/2405.14093",
+      "publisher": "IEEE Transactions on Neural Networks and Learning Systems / arXiv",
+      "quality_reason": "经过多次修订并发表于 IEEE TNNLS；覆盖 VLA 组件、低层控制策略、高层任务规划、数据集、模拟器与基准，适合建立领域边界和长期术语骨架。",
+      "curriculum_role": "支持 VLA 定义、视觉表示、策略架构、世界模型接口、推理、评测与领域边界。",
+      "verified": true
+    },
+    {
+      "id": "survey_real_world_2025",
+      "title": "Vision-Language-Action Models for Robotics: A Review Towards Real-World Applications",
+      "authors": [
+        "Kento Kawaharazuka",
+        "Jihoon Oh",
+        "Jun Yamada",
+        "Ingmar Posner",
+        "Yuke Zhu"
+      ],
+      "year": 2025,
+      "type": "survey",
+      "url": "https://arxiv.org/abs/2510.07077",
+      "publisher": "IEEE Access / arXiv",
+      "quality_reason": "面向真实机器人应用的 full-stack 综述，系统覆盖模态处理、动作表示、架构、训练、数据、推理、平台和评测，并给出工程视角。",
+      "curriculum_role": "作为训练—数据—推理—部署—评测主干证据，尤其支持动作生成、微调、跨本体、延迟和失败模式节点。",
+      "verified": true
+    },
+    {
+      "id": "survey_large_vlm_2025",
+      "title": "Large VLM-based Vision-Language-Action Models for Robotic Manipulation: A Survey",
+      "authors": [
+        "Rui Shao",
+        "Wei Li",
+        "Lingsen Zhang",
+        "Renshan Zhang",
+        "Zhiyang Liu",
+        "Ran Chen",
+        "Liqiang Nie"
+      ],
+      "year": 2025,
+      "type": "survey",
+      "url": "https://arxiv.org/abs/2508.13073",
+      "publisher": "arXiv",
+      "quality_reason": "专门讨论大 VLM 驱动的 VLA，并在 2026-08 仍有修订；明确区分 monolithic、dual-system 与 hierarchical 架构，并覆盖 RL、人类视频、世界模型、记忆和多模态扩展。",
+      "curriculum_role": "支持系统架构分类、推理与中间表示、VLA 后训练和前沿扩展的稳定性判断。",
+      "verified": true
+    },
+    {
+      "id": "survey_action_tokenization_2025",
+      "title": "A Survey on Vision-Language-Action Models: An Action Tokenization Perspective",
+      "authors": [
+        "Yifan Zhong",
+        "Fengshuo Bai",
+        "Shaofei Cai",
+        "Xuchuan Huang",
+        "Zhang Chen",
+        "Xiaowei Zhang",
+        "Yuanfei Wang",
+        "Shaoyang Guo",
+        "Tianrui Guan",
+        "Ka Nam Lui",
+        "Zhiquan Qi",
+        "Yitao Liang",
+        "Yuanpei Chen",
+        "Yaodong Yang"
+      ],
+      "year": 2025,
+      "type": "survey",
+      "url": "https://arxiv.org/abs/2507.01925",
+      "publisher": "arXiv",
+      "quality_reason": "70 页专项综述，以 action token 为统一视角，区分 language/code/affordance/trajectory/goal/latent/raw action/reasoning，对动作表示术语消歧尤其有价值。",
+      "curriculum_role": "支持动作离散化与压缩、原始动作与中间动作抽象、latent action、人类视频和 reasoning 节点。",
+      "verified": true
+    },
+    {
+      "id": "course_eth_robot_learning_2026",
+      "title": "Robot Learning: From Fundamentals to Foundation Models",
+      "authors": [
+        "Oier Mees"
+      ],
+      "year": 2026,
+      "type": "course",
+      "url": "https://cvg.ethz.ch/lectures/Robot-Learning/",
+      "publisher": "ETH Zurich",
+      "quality_reason": "2026 春季大学课程，明确从 imitation learning、RL、生成模型、Transformer、world models 过渡到 generalist robot policies 与 VLA/foundation models。",
+      "curriculum_role": "用于校准必要前置、学习顺序以及生成式策略、序列建模、世界模型与 foundation policy 的衔接。",
+      "verified": true
+    },
+    {
+      "id": "course_cornell_robot_learning_2026",
+      "title": "CS 4756/5756 Robot Learning",
+      "authors": [
+        "Kuan Fang"
+      ],
+      "year": 2026,
+      "type": "course",
+      "url": "https://www.cs.cornell.edu/courses/cs4756/2026sp/",
+      "publisher": "Cornell University",
+      "quality_reason": "2026 春季机器人学习课程，覆盖 imitation learning、控制与 MDP、仿真、2D/3D 表示、端到端视觉运动策略、迁移、多任务、生成模型与 Transformer policy。",
+      "curriculum_role": "用于验证行为克隆、视觉表示、Sim2Real、迁移、生成策略和 sequence policy 的先后关系；不把通用 RL/控制整段纳入 VLA 课程。",
+      "verified": true
+    },
+    {
+      "id": "repo_awesome_vla_official_2026",
+      "title": "Awesome VLA",
+      "authors": [
+        "Yueen Ma",
+        "Zixing Song",
+        "Yuzheng Zhuang",
+        "Jianye Hao",
+        "Irwin King"
+      ],
+      "year": 2026,
+      "type": "curated_repository",
+      "url": "https://github.com/yueen-ma/Awesome-VLA",
+      "publisher": "GitHub / Official survey repository",
+      "quality_reason": "对应 TNNLS Survey 的官方 curated repository，包含定义、组件、低层策略、任务规划、相关综述和持续更新的论文清单；适合检测新增术语而非单独决定课程结构。",
+      "curriculum_role": "用于交叉核对领域覆盖、前沿更新信号、评测/平台/效率/RL 等新分支。",
+      "verified": true
+    },
+    {
+      "id": "repo_awesome_vla_robotics_2026",
+      "title": "Awesome VLA for Robotics",
+      "authors": [
+        "Jiaaqiliu"
+      ],
+      "year": 2026,
+      "type": "curated_repository",
+      "url": "https://github.com/Jiaaqiliu/Awesome-VLA-Robotics",
+      "publisher": "GitHub",
+      "quality_reason": "持续维护的 VLA 机器人资源表，按架构、动作表示、学习范式、输入模态、微调、数据集和 benchmark 分类，并跟踪 2025–2026 新工作。",
+      "curriculum_role": "作为第二个独立 curated repo 进行遗漏扫描和术语变化检查，尤其覆盖 dual-system、3D/触觉、效率、RL post-training 与新 benchmark。",
+      "verified": true
+    },
+    {
+      "id": "paper_rt2_2023",
+      "title": "RT-2: Vision-Language-Action Models Transfer Web Knowledge to Robotic Control",
+      "authors": [
+        "Anthony Brohan et al."
+      ],
+      "year": 2023,
+      "type": "paper",
+      "url": "https://arxiv.org/abs/2307.15818",
+      "publisher": "arXiv / Google DeepMind",
+      "quality_reason": "VLA 术语和“将 VLM 与机器人动作共同建模”的代表性奠基工作，明确采用机器人数据与互联网视觉语言任务 co-fine-tuning，并将动作表达为 token。",
+      "curriculum_role": "支持 VLA 问题定义、VLM 到动作的迁移、动作 token、联合训练和语义泛化。",
+      "verified": true
+    },
+    {
+      "id": "paper_diffusion_policy_2023",
+      "title": "Diffusion Policy: Visuomotor Policy Learning via Action Diffusion",
+      "authors": [
+        "Cheng Chi",
+        "Zhenjia Xu",
+        "Siyuan Feng",
+        "Eric Cousineau",
+        "Yilun Du",
+        "Benjamin Burchfiel",
+        "Russ Tedrake",
+        "Shuran Song"
+      ],
+      "year": 2023,
+      "type": "paper",
+      "url": "https://arxiv.org/abs/2303.04137",
+      "publisher": "arXiv",
+      "quality_reason": "动作 diffusion 策略的奠基代表工作，清楚展示条件去噪、动作分布多模态性、receding-horizon 控制与视觉条件化。",
+      "curriculum_role": "支持 diffusion 动作生成、连续动作分布、action horizon 与部署时滚动执行。",
+      "verified": true
+    },
+    {
+      "id": "paper_act_2023",
+      "title": "Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware",
+      "authors": [
+        "Tony Z. Zhao",
+        "Vikash Kumar",
+        "Sergey Levine",
+        "Chelsea Finn"
+      ],
+      "year": 2023,
+      "type": "paper",
+      "url": "https://arxiv.org/abs/2304.13705",
+      "publisher": "arXiv",
+      "quality_reason": "Action Chunking with Transformers (ACT) 的代表工作，直接针对行为克隆中的误差累积与非平稳示范，建立 action chunking 的机器人策略语境。",
+      "curriculum_role": "支持行为克隆、action chunking、序列策略、示范质量与闭环执行。",
+      "verified": true
+    },
+    {
+      "id": "paper_open_x_embodiment_2024",
+      "title": "Open X-Embodiment: Robotic Learning Datasets and RT-X Models",
+      "authors": [
+        "Open X-Embodiment Collaboration"
+      ],
+      "year": 2024,
+      "type": "paper",
+      "url": "https://arxiv.org/abs/2310.08864",
+      "publisher": "ICRA / arXiv",
+      "quality_reason": "跨实验室、跨机器人数据规模化的代表性工作，是理解 Open X-Embodiment 数据格式、异构数据混合与 cross-embodiment transfer 的关键锚点。",
+      "curriculum_role": "支持机器人轨迹 schema、数据混合、跨本体动作对齐、泛化与 generalist policy 预训练。",
+      "verified": true
+    },
+    {
+      "id": "paper_octo_2024",
+      "title": "Octo: An Open-Source Generalist Robot Policy",
+      "authors": [
+        "Octo Model Team",
+        "Dibya Ghosh",
+        "Homer Walke",
+        "Karl Pertsch",
+        "Kevin Black",
+        "Oier Mees",
+        "Sudeep Dasari",
+        "Joey Hejna",
+        "Tobias Kreiman",
+        "Charles Xu",
+        "Jianlan Luo",
+        "You Liang Tan",
+        "Lawrence Yunliang Chen",
+        "Pannag Sanketi",
+        "Quan Vuong",
+        "Ted Xiao",
+        "Dorsa Sadigh",
+        "Chelsea Finn",
+        "Sergey Levine"
+      ],
+      "year": 2024,
+      "type": "paper",
+      "url": "https://arxiv.org/abs/2405.12213",
+      "publisher": "arXiv",
+      "quality_reason": "开放 generalist robot policy，基于大规模跨本体数据训练并支持新观测/动作空间微调；有助于把 VLA 与更宽泛 generalist policy 概念正确连接。",
+      "curriculum_role": "支持任务条件化、数据混合、跨本体训练、动作头、微调和 VLA 与传统/通用机器人策略的边界。",
+      "verified": true
+    },
+    {
+      "id": "paper_openvla_2024",
+      "title": "OpenVLA: An Open-Source Vision-Language-Action Model",
+      "authors": [
+        "Moo Jin Kim",
+        "Karl Pertsch",
+        "Siddharth Karamcheti",
+        "Ted Xiao",
+        "Ashwin Balakrishna",
+        "Suraj Nair",
+        "Rafael Rafailov",
+        "Ethan Foster",
+        "Grace Lam",
+        "Pannag Sanketi",
+        "Quan Vuong",
+        "Thomas Kollar",
+        "Benjamin Burchfiel",
+        "Russ Tedrake",
+        "Dorsa Sadigh",
+        "Sergey Levine",
+        "Percy Liang",
+        "Chelsea Finn"
+      ],
+      "year": 2024,
+      "type": "paper",
+      "url": "https://arxiv.org/abs/2406.09246",
+      "publisher": "arXiv",
+      "quality_reason": "开放 VLA 的核心锚点，清晰展示预训练视觉编码器 + LLM、跨机器人数据训练、LoRA 微调与量化部署。",
+      "curriculum_role": "支持 VLM/Vision backbone、动作 token、fine-tuning/PEFT、数据训练、泛化与部署效率。",
+      "verified": true
+    },
+    {
+      "id": "paper_pi0_2025",
+      "title": "π₀: A Vision-Language-Action Flow Model for General Robot Control",
+      "authors": [
+        "Kevin Black",
+        "Noah Brown",
+        "Danny Driess",
+        "Adnan Esmail",
+        "Michael Robert Equi",
+        "Chelsea Finn",
+        "Niccolo Fusai",
+        "Lachy Groom",
+        "Karol Hausman",
+        "Brian Ichter",
+        "Szymon Jakubczak",
+        "Tim Jones",
+        "Liyiming Ke",
+        "Sergey Levine",
+        "Adrian Li-Bell",
+        "Mohith Mothukuri",
+        "Suraj Nair",
+        "Karl Pertsch",
+        "Lucy Xiaoyang Shi",
+        "Laura Smith",
+        "James Tanner",
+        "Quan Vuong",
+        "Anna Walling",
+        "Haohuan Wang",
+        "Ury Zhilinsky"
+      ],
+      "year": 2025,
+      "type": "paper",
+      "url": "https://www.roboticsproceedings.org/rss21/p010.html",
+      "publisher": "Robotics: Science and Systems",
+      "quality_reason": "RSS 2025 正式论文，以预训练 VLM 为基础并用 flow matching 生成连续动作，是现代 VLA 连续生成与 action expert 路线的重要代表。",
+      "curriculum_role": "支持 flow matching、连续 action expert、跨平台数据训练、fine-tuning 与通用策略。",
+      "verified": true
+    },
+    {
+      "id": "paper_fast_2025",
+      "title": "FAST: Efficient Action Tokenization for Vision-Language-Action Models",
+      "authors": [
+        "Karl Pertsch",
+        "Kyle Stachowicz",
+        "Brian Ichter",
+        "Danny Driess",
+        "Suraj Nair",
+        "Quan Vuong",
+        "Oier Mees",
+        "Chelsea Finn",
+        "Sergey Levine"
+      ],
+      "year": 2025,
+      "type": "paper",
+      "url": "https://www.roboticsproceedings.org/rss21/p012.html",
+      "publisher": "Robotics: Science and Systems",
+      "quality_reason": "RSS 2025 正式论文，直接分析逐维逐时刻离散化的局限，并提出基于 DCT 的压缩动作 tokenization；是高频动作 token 化的关键证据。",
+      "curriculum_role": "支持 action discretization、compressed tokenization、控制频率、序列长度与训练/推理效率。",
+      "verified": true
+    },
+    {
+      "id": "paper_groot_n1_2025",
+      "title": "GR00T N1: An Open Foundation Model for Generalist Humanoid Robots",
+      "authors": [
+        "NVIDIA: Johan Bjorck et al."
+      ],
+      "year": 2025,
+      "type": "paper",
+      "url": "https://arxiv.org/abs/2503.14734",
+      "publisher": "arXiv / NVIDIA",
+      "quality_reason": "明确提出紧耦合 dual-system VLA：System 2 视觉语言模块与 System 1 diffusion transformer 动作模块，并混合真实机器人、人类视频和合成数据。",
+      "curriculum_role": "支持 dual-system/action-expert 架构、多源数据混合、人类视频、合成数据与多本体训练。",
+      "verified": true
+    },
+    {
+      "id": "paper_gemini_robotics_2025",
+      "title": "Gemini Robotics: Bringing AI into the Physical World",
+      "authors": [
+        "Gemini Robotics Team et al."
+      ],
+      "year": 2025,
+      "type": "paper",
+      "url": "https://arxiv.org/abs/2503.20020",
+      "publisher": "arXiv / Google DeepMind",
+      "quality_reason": "官方技术报告给出 generalist VLA、Embodied Reasoning、跨本体适应、空间/时间理解、3D 预测与安全讨论，适合支持但不应主导前沿节点。",
+      "curriculum_role": "支持语言/空间 grounding、reasoning、扩展视觉模态、跨本体泛化和安全/可靠性。",
+      "verified": true
+    }
+  ]
+}

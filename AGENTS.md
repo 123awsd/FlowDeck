@@ -37,7 +37,6 @@
 
 ## 验证与提交
 
-- Python 修改至少运行 `python3 -m py_compile`；推荐系统修改同时运行 `python3 -m unittest -v test_learning_feed.py`。
+- Python 修改至少运行 `PYTHONPATH=src python3 -m py_compile src/codex_control_tower/*.py`；推荐系统修改同时运行 `PYTHONPATH=src python3 -m unittest discover -s tests -v`。
 - UI 修改需要渲染或实际启动检查布局、中文字体、裁切和交互状态。
 - 提交前运行 `git diff --check`，确认 `.env`、运行数据库和个人状态文件没有进入 Git。
-

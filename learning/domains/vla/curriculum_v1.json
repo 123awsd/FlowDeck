@@ -1,0 +1,1932 @@
+{
+  "schema_version": 1,
+  "domain": {
+    "id": "vla",
+    "name_zh": "视觉语言动作模型",
+    "name_en": "Vision-Language-Action Models",
+    "version": "v1",
+    "status": "reviewed_draft",
+    "description": "面向具备深度学习与机器人基础的学习者，聚焦现代 VLA 的必要前置、模态与动作表示、动作生成、系统架构、训练与机器人数据、跨本体与 Sim2Real、泛化评测和真实部署。World Model、RL、VLN/导航式层级策略和传统控制仅保留与 VLA 直接相连的接口，不扩张为泛具身智能课程。"
+  },
+  "source_ids": [
+    "survey_ma_2026",
+    "survey_real_world_2025",
+    "survey_large_vlm_2025",
+    "survey_action_tokenization_2025",
+    "course_eth_robot_learning_2026",
+    "course_cornell_robot_learning_2026",
+    "repo_awesome_vla_official_2026",
+    "repo_awesome_vla_robotics_2026",
+    "paper_rt2_2023",
+    "paper_diffusion_policy_2023",
+    "paper_act_2023",
+    "paper_open_x_embodiment_2024",
+    "paper_octo_2024",
+    "paper_openvla_2024",
+    "paper_pi0_2025",
+    "paper_fast_2025",
+    "paper_groot_n1_2025",
+    "paper_gemini_robotics_2025"
+  ],
+  "modules": [
+    {
+      "id": "foundations",
+      "title_zh": "必要前置与 VLA 定义",
+      "title_en": "Foundations and VLA Framing",
+      "order": 1,
+      "goal": "建立只与 VLA 直接相关的行为克隆、Transformer sequence policy、VLM grounding 和问题边界。",
+      "concept_ids": [
+        "vla_problem_formulation",
+        "behavior_cloning_for_vla",
+        "transformer_policy_sequence_modeling",
+        "vlm_backbone_and_robotic_grounding"
+      ]
+    },
+    {
+      "id": "multimodal_representation",
+      "title_zh": "多模态输入与表示",
+      "title_en": "Multimodal Inputs and Representation",
+      "order": 2,
+      "goal": "理解视觉、语言、机器人状态和扩展传感模态如何被表示、对齐并形成动作条件。",
+      "concept_ids": [
+        "visual_representation_for_control",
+        "language_conditioning_and_grounding",
+        "robot_state_and_proprioception",
+        "multimodal_fusion_and_token_interface",
+        "temporal_context_and_observation_history",
+        "extended_modalities_3d_tactile_audio"
+      ]
+    },
+    {
+      "id": "action_representation_generation",
+      "title_zh": "动作表示与生成",
+      "title_en": "Action Representation and Generation",
+      "order": 3,
+      "goal": "掌握 action space、tokenization、chunking，以及 AR、diffusion、flow matching 等动作生成范式的统一比较框架。",
+      "concept_ids": [
+        "action_space_and_control_parameterization",
+        "action_discretization_and_tokenization",
+        "continuous_action_decoding",
+        "action_chunking_and_horizon",
+        "compressed_action_tokenization",
+        "autoregressive_action_generation",
+        "diffusion_action_generation",
+        "flow_matching_action_generation"
+      ]
+    },
+    {
+      "id": "architecture_systems",
+      "title_zh": "VLA 架构与系统接口",
+      "title_en": "VLA Architectures and System Interfaces",
+      "order": 4,
+      "goal": "比较 monolithic、dual-system/action expert、hierarchical planner-policy 及中间动作抽象，并限定 reasoning/world-model 的位置。",
+      "concept_ids": [
+        "monolithic_vla_architecture",
+        "dual_system_action_expert_architecture",
+        "hierarchical_planner_policy_architecture",
+        "intermediate_action_abstractions",
+        "reasoning_for_action_and_spatial_grounding",
+        "world_model_vla_interface"
+      ]
+    },
+    {
+      "id": "training_data",
+      "title_zh": "训练、数据与迁移",
+      "title_en": "Training, Data and Transfer",
+      "order": 5,
+      "goal": "理解机器人轨迹数据、混合与跨本体训练、预训练/微调/post-training、人类视频与 Sim2Real。",
+      "concept_ids": [
+        "robot_data_and_trajectory_schema",
+        "data_collection_and_demonstration_quality",
+        "dataset_mixture_and_sampling",
+        "cross_embodiment_training_and_action_alignment",
+        "pretraining_cotuning_and_auxiliary_objectives",
+        "downstream_finetuning_and_peft",
+        "vla_post_training_with_rl",
+        "human_video_and_latent_action_learning",
+        "simulation_augmentation_and_sim2real"
+      ]
+    },
+    {
+      "id": "generalization_evaluation",
+      "title_zh": "泛化、评测与可靠性",
+      "title_en": "Generalization, Evaluation and Reliability",
+      "order": 6,
+      "goal": "建立可比较的泛化 taxonomy、benchmark/真实机器人评测方法与失败诊断框架。",
+      "concept_ids": [
+        "generalization_taxonomy",
+        "benchmarks_and_evaluation_protocols",
+        "failure_modes_and_reliability"
+      ]
+    },
+    {
+      "id": "deployment",
+      "title_zh": "推理与部署",
+      "title_en": "Inference and Deployment",
+      "order": 7,
+      "goal": "理解控制频率、延迟、异步 chunk 执行以及压缩/端侧部署对真实 VLA 系统的约束。",
+      "concept_ids": [
+        "real_time_inference_and_control_frequency",
+        "asynchronous_chunk_execution_and_replanning",
+        "efficiency_compression_and_on_device"
+      ]
+    }
+  ],
+  "concepts": [
+    {
+      "id": "vla_problem_formulation",
+      "title_zh": "VLA 问题定义与领域边界",
+      "title_en": "VLA Problem Formulation and Scope",
+      "module_id": "foundations",
+      "order": 1,
+      "priority": "P0",
+      "priority_reason": "所有 VLA 论文和项目都默认这一问题边界；如果定义不清，后续架构、数据和评测会被混淆。",
+      "stability": "foundation",
+      "scope": "理解 VLA 作为以视觉、语言及机器人状态为条件、输出可执行动作或动作中间表示的策略范式；区分 VLA、VLM、generalist robot policy 与传统模块化机器人栈。只保留与策略学习直接相关的观测—条件—动作接口，不展开通用机器人学。",
+      "prerequisites": [],
+      "related_concepts": [
+        "vlm_backbone_and_robotic_grounding",
+        "action_space_and_control_parameterization",
+        "monolithic_vla_architecture"
+      ],
+      "learning_goals": [
+        "能用输入、输出、训练信号和执行闭环定义一个 VLA 系统。",
+        "能解释为何 VLM 能力本身不等同于机器人策略，并识别“广义 VLA”与“大 VLM-based VLA”的口径差异。"
+      ],
+      "recognition_keywords": [
+        "Vision-Language-Action",
+        "VLA",
+        "generalist robot policy",
+        "embodied policy",
+        "language-conditioned control"
+      ],
+      "representative_works": [
+        "RT-2",
+        "OpenVLA",
+        "π₀"
+      ],
+      "source_ids": [
+        "survey_ma_2026",
+        "survey_real_world_2025",
+        "paper_rt2_2023"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "behavior_cloning_for_vla",
+      "title_zh": "VLA 中的行为克隆",
+      "title_en": "Behavior Cloning for VLA",
+      "module_id": "foundations",
+      "order": 2,
+      "priority": "P0",
+      "priority_reason": "当前大多数 VLA 的基础训练仍以机器人示范上的监督/模仿学习为核心，是理解训练损失与失败模式的最低前置。",
+      "stability": "foundation",
+      "scope": "学习监督式示范学习目标、轨迹条件概率、teacher-forced 训练与 covariate shift/误差累积；聚焦 VLA 最常见的 imitation learning 基线与训练信号，不展开完整 imitation learning 算法谱系。",
+      "prerequisites": [
+        "vla_problem_formulation"
+      ],
+      "related_concepts": [
+        "action_chunking_and_horizon",
+        "robot_data_and_trajectory_schema",
+        "vla_post_training_with_rl"
+      ],
+      "learning_goals": [
+        "能从机器人示范数据写出 VLA 行为克隆的训练目标并解释其假设。",
+        "能说明为什么闭环执行时的小误差会造成分布偏移，并把它与 chunking、数据质量和 post-training 联系起来。"
+      ],
+      "recognition_keywords": [
+        "behavior cloning",
+        "imitation learning",
+        "demonstration",
+        "covariate shift",
+        "compounding error",
+        "teacher forcing"
+      ],
+      "representative_works": [
+        "ACT",
+        "OpenVLA"
+      ],
+      "source_ids": [
+        "course_eth_robot_learning_2026",
+        "course_cornell_robot_learning_2026",
+        "paper_act_2023",
+        "survey_real_world_2025"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "transformer_policy_sequence_modeling",
+      "title_zh": "Transformer 策略与序列建模",
+      "title_en": "Transformer Policy and Sequence Modeling",
+      "module_id": "foundations",
+      "order": 3,
+      "priority": "P0",
+      "priority_reason": "Transformer 是现代 VLA 最反复出现的策略骨架；只保留序列策略所需部分即可避免回到通用基础课。",
+      "stability": "foundation",
+      "scope": "只复习与 VLA 直接相关的 self-attention、causal masking、encoder/decoder、序列位置、token readout 与多步序列预测；不从头教授通用 Transformer 数学或语言建模历史。",
+      "prerequisites": [
+        "vla_problem_formulation"
+      ],
+      "related_concepts": [
+        "vlm_backbone_and_robotic_grounding",
+        "action_discretization_and_tokenization",
+        "autoregressive_action_generation",
+        "action_chunking_and_horizon"
+      ],
+      "learning_goals": [
+        "能读懂 VLA 中视觉/语言/状态/动作被组织成 token 序列的基本数据流。",
+        "能区分 causal autoregressive policy、encoder-decoder policy 与并行 action head 的序列约束。"
+      ],
+      "recognition_keywords": [
+        "self-attention",
+        "causal mask",
+        "token sequence",
+        "Transformer policy",
+        "encoder-decoder",
+        "sequence modeling"
+      ],
+      "representative_works": [
+        "RT-2",
+        "ACT",
+        "Octo"
+      ],
+      "source_ids": [
+        "course_eth_robot_learning_2026",
+        "course_cornell_robot_learning_2026",
+        "paper_act_2023",
+        "paper_octo_2024"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "vlm_backbone_and_robotic_grounding",
+      "title_zh": "VLM 骨干与机器人 Grounding",
+      "title_en": "VLM Backbone and Robotic Grounding",
+      "module_id": "foundations",
+      "order": 4,
+      "priority": "P0",
+      "priority_reason": "理解 VLA 与 VLM 的继承关系是阅读现代 VLA 架构、预训练与泛化论述的核心前提。",
+      "stability": "foundation",
+      "scope": "理解预训练 VLM/多模态 LLM 如何提供视觉语言语义，并通过机器人数据将语义 grounding 到动作；关注 backbone、投影/适配和 co-fine-tuning 的接口，不展开 VLM 全部预训练细节。",
+      "prerequisites": [
+        "transformer_policy_sequence_modeling"
+      ],
+      "related_concepts": [
+        "visual_representation_for_control",
+        "language_conditioning_and_grounding",
+        "multimodal_fusion_and_token_interface",
+        "pretraining_cotuning_and_auxiliary_objectives"
+      ],
+      "learning_goals": [
+        "能解释从 VLM 到 VLA 需要新增什么动作建模与机器人 grounding 信号。",
+        "能比较“直接把动作当 token”与“VLM + 专用动作头/专家”两种基本接口。"
+      ],
+      "recognition_keywords": [
+        "VLM backbone",
+        "multimodal LLM",
+        "robotic grounding",
+        "co-fine-tuning",
+        "vision-language prior",
+        "action head"
+      ],
+      "representative_works": [
+        "RT-2",
+        "OpenVLA",
+        "π₀"
+      ],
+      "source_ids": [
+        "survey_real_world_2025",
+        "survey_large_vlm_2025",
+        "paper_rt2_2023",
+        "paper_openvla_2024",
+        "paper_pi0_2025"
+      ],
+      "estimated_card_minutes": 5
+    },
+    {
+      "id": "visual_representation_for_control",
+      "title_zh": "面向控制的视觉表示",
+      "title_en": "Visual Representation for Control",
+      "module_id": "multimodal_representation",
+      "order": 1,
+      "priority": "P1",
+      "priority_reason": "视觉表示直接影响 VLA 的对象泛化和空间精度，但已有深度学习基础的学习者无需把它设为最低 P0。",
+      "stability": "foundation",
+      "scope": "学习控制中常用的预训练视觉特征、ViT/CLIP/SigLIP/DINO 类表征、冻结或微调以及语义不变性与精细空间信息的张力；不展开通用视觉识别课程。",
+      "prerequisites": [
+        "vlm_backbone_and_robotic_grounding"
+      ],
+      "related_concepts": [
+        "multimodal_fusion_and_token_interface",
+        "extended_modalities_3d_tactile_audio",
+        "generalization_taxonomy"
+      ],
+      "learning_goals": [
+        "能判断 VLA 视觉 backbone 提供的是语义、空间还是局部细节，并识别其控制局限。",
+        "能解释冻结、联合微调和多视觉编码器融合为何会影响泛化与动作精度。"
+      ],
+      "recognition_keywords": [
+        "vision encoder",
+        "ViT",
+        "SigLIP",
+        "DINOv2",
+        "CLIP",
+        "visual tokens",
+        "pretrained representation"
+      ],
+      "representative_works": [
+        "OpenVLA"
+      ],
+      "source_ids": [
+        "survey_ma_2026",
+        "survey_real_world_2025",
+        "paper_openvla_2024"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "language_conditioning_and_grounding",
+      "title_zh": "语言条件化与指令 Grounding",
+      "title_en": "Language Conditioning and Instruction Grounding",
+      "module_id": "multimodal_representation",
+      "order": 2,
+      "priority": "P0",
+      "priority_reason": "语言是 VLA 与纯视觉运动策略的关键条件变量，论文中的泛化和 reasoning 结论通常依赖此节点。",
+      "stability": "foundation",
+      "scope": "学习自然语言指令如何作为任务条件，与视觉对象、空间关系、技能和动作关联；关注 open-vocabulary 指令、语义迁移与歧义，不展开通用 NLP。",
+      "prerequisites": [
+        "vlm_backbone_and_robotic_grounding"
+      ],
+      "related_concepts": [
+        "multimodal_fusion_and_token_interface",
+        "reasoning_for_action_and_spatial_grounding",
+        "generalization_taxonomy"
+      ],
+      "learning_goals": [
+        "能区分“理解语言”与“把语言约束落到可执行动作”的 grounding。",
+        "能在论文中识别 instruction following、semantic generalization、object/relational grounding 的评测设计。"
+      ],
+      "recognition_keywords": [
+        "instruction grounding",
+        "language conditioning",
+        "open-vocabulary",
+        "semantic grounding",
+        "language-conditioned policy"
+      ],
+      "representative_works": [
+        "RT-2",
+        "OpenVLA",
+        "Gemini Robotics"
+      ],
+      "source_ids": [
+        "paper_rt2_2023",
+        "paper_openvla_2024",
+        "paper_gemini_robotics_2025",
+        "survey_real_world_2025"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "robot_state_and_proprioception",
+      "title_zh": "机器人状态与本体感觉输入",
+      "title_en": "Robot State and Proprioception",
+      "module_id": "multimodal_representation",
+      "order": 3,
+      "priority": "P1",
+      "priority_reason": "真实 VLA 往往不仅输入 RGB；理解 proprioception 是复现项目和处理跨本体数据的必要工程知识。",
+      "stability": "foundation",
+      "scope": "理解关节/末端执行器/夹爪/base 等 proprioceptive state 如何与图像、语言一起进入策略，包括归一化、时间同步和 embodiment-specific state；不展开状态估计或传感器融合通论。",
+      "prerequisites": [
+        "vla_problem_formulation"
+      ],
+      "related_concepts": [
+        "temporal_context_and_observation_history",
+        "action_space_and_control_parameterization",
+        "cross_embodiment_training_and_action_alignment"
+      ],
+      "learning_goals": [
+        "能读懂一个 VLA 的 state vector 含义和时间对齐方式。",
+        "能解释状态定义变化为何会影响跨机器人迁移与动作归一化。"
+      ],
+      "recognition_keywords": [
+        "proprioception",
+        "robot state",
+        "joint state",
+        "end-effector state",
+        "state normalization",
+        "observation"
+      ],
+      "representative_works": [
+        "Octo",
+        "Open X-Embodiment"
+      ],
+      "source_ids": [
+        "survey_real_world_2025",
+        "paper_open_x_embodiment_2024",
+        "paper_octo_2024"
+      ],
+      "estimated_card_minutes": 3
+    },
+    {
+      "id": "multimodal_fusion_and_token_interface",
+      "title_zh": "多模态融合与 Token 接口",
+      "title_en": "Multimodal Fusion and Token Interfaces",
+      "module_id": "multimodal_representation",
+      "order": 4,
+      "priority": "P1",
+      "priority_reason": "不同 VLA 名称变化很快，但模态如何对齐并通过接口传到动作模块是相对稳定的设计问题。",
+      "stability": "foundation",
+      "scope": "学习视觉、语言、状态和动作信息如何通过 projection、concatenation、cross-attention、query/token compression 或专用接口融合；强调接口形态和信息瓶颈，不展开所有多模态网络变体。",
+      "prerequisites": [
+        "vlm_backbone_and_robotic_grounding",
+        "visual_representation_for_control"
+      ],
+      "related_concepts": [
+        "monolithic_vla_architecture",
+        "dual_system_action_expert_architecture",
+        "action_discretization_and_tokenization"
+      ],
+      "learning_goals": [
+        "能画出一个 VLA 的模态进入 backbone/action head 的信息流。",
+        "能识别融合发生在 token 级、latent 级还是 action expert 条件级，并推断其训练/延迟影响。"
+      ],
+      "recognition_keywords": [
+        "projection layer",
+        "cross-attention",
+        "multimodal fusion",
+        "visual tokens",
+        "Q-Former",
+        "TokenLearner",
+        "latent interface"
+      ],
+      "representative_works": [
+        "OpenVLA",
+        "GR00T N1"
+      ],
+      "source_ids": [
+        "survey_real_world_2025",
+        "repo_awesome_vla_robotics_2026",
+        "paper_openvla_2024",
+        "paper_groot_n1_2025"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "temporal_context_and_observation_history",
+      "title_zh": "时间上下文与观测历史",
+      "title_en": "Temporal Context and Observation History",
+      "module_id": "multimodal_representation",
+      "order": 5,
+      "priority": "P1",
+      "priority_reason": "时序条件是理解 action chunk、闭环执行和长任务失效的桥梁，但长期记忆仍不足以作为 P0 独立基础。",
+      "stability": "foundation",
+      "scope": "学习单帧 vs 历史窗口、时序 token、状态历史和短期记忆如何影响部分可观测性与动作连续性；不把长期 episodic memory 单独扩张为通用 agent memory 课程。",
+      "prerequisites": [
+        "transformer_policy_sequence_modeling",
+        "robot_state_and_proprioception"
+      ],
+      "related_concepts": [
+        "action_chunking_and_horizon",
+        "world_model_vla_interface",
+        "real_time_inference_and_control_frequency"
+      ],
+      "learning_goals": [
+        "能判断策略是在单时刻、固定历史窗口还是显式 memory 上条件化。",
+        "能解释 observation horizon、action horizon 和控制频率之间的区别。"
+      ],
+      "recognition_keywords": [
+        "observation horizon",
+        "history window",
+        "temporal context",
+        "temporal tokens",
+        "memory",
+        "partial observability"
+      ],
+      "representative_works": [
+        "Diffusion Policy",
+        "ACT"
+      ],
+      "source_ids": [
+        "paper_diffusion_policy_2023",
+        "paper_act_2023",
+        "survey_real_world_2025"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "extended_modalities_3d_tactile_audio",
+      "title_zh": "3D、触觉与其他扩展模态",
+      "title_en": "Extended Modalities: 3D, Tactile and Audio",
+      "module_id": "multimodal_representation",
+      "order": 6,
+      "priority": "P2",
+      "priority_reason": "3D/触觉正在快速发展且对接触丰富任务很重要，但尚非所有 VLA 的共同必要条件，适合作为遇到项目时学习的前沿节点。",
+      "stability": "frontier",
+      "scope": "了解点云/深度/3D 几何、触觉/力觉与音频如何补充 RGB+language，重点学习何时它们改变空间或接触 grounding；不展开完整 3D vision、触觉传感或语音技术。",
+      "prerequisites": [
+        "visual_representation_for_control",
+        "robot_state_and_proprioception",
+        "multimodal_fusion_and_token_interface"
+      ],
+      "related_concepts": [
+        "reasoning_for_action_and_spatial_grounding",
+        "failure_modes_and_reliability"
+      ],
+      "learning_goals": [
+        "遇到多传感器 VLA 时能识别新增模态解决的可观测性缺口。",
+        "能区分“加入更多传感器”与“真正跨模态 grounding/融合”的差别。"
+      ],
+      "recognition_keywords": [
+        "3D VLA",
+        "point cloud",
+        "depth",
+        "tactile-language-action",
+        "force sensing",
+        "audio-conditioned policy",
+        "multi-sensor"
+      ],
+      "representative_works": [
+        "Gemini Robotics",
+        "TLA",
+        "PointVLA"
+      ],
+      "source_ids": [
+        "survey_real_world_2025",
+        "survey_large_vlm_2025",
+        "paper_gemini_robotics_2025",
+        "repo_awesome_vla_robotics_2026"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "action_space_and_control_parameterization",
+      "title_zh": "动作空间与控制参数化",
+      "title_en": "Action Space and Control Parameterization",
+      "module_id": "action_representation_generation",
+      "order": 1,
+      "priority": "P0",
+      "priority_reason": "所有动作 token、diffusion/flow head 和跨本体训练最终都落到具体可执行 action space；这是不可跳过的共同基础。",
+      "stability": "foundation",
+      "scope": "学习 VLA 输出所对应的 joint/Cartesian end-effector、delta/absolute pose、gripper、base 等动作参数，以及尺度、坐标系、归一化和低层控制器接口；不展开控制器设计和动力学推导。",
+      "prerequisites": [
+        "behavior_cloning_for_vla"
+      ],
+      "related_concepts": [
+        "action_discretization_and_tokenization",
+        "continuous_action_decoding",
+        "action_chunking_and_horizon",
+        "cross_embodiment_training_and_action_alignment"
+      ],
+      "learning_goals": [
+        "能从数据集或代码确定 action vector 每一维的物理语义。",
+        "能解释同一语义任务在不同 action spaces 下为何不能直接共享低层动作标签。"
+      ],
+      "recognition_keywords": [
+        "action space",
+        "end-effector action",
+        "joint action",
+        "delta pose",
+        "absolute pose",
+        "gripper action",
+        "action normalization"
+      ],
+      "representative_works": [
+        "Open X-Embodiment",
+        "Octo"
+      ],
+      "source_ids": [
+        "survey_real_world_2025",
+        "paper_open_x_embodiment_2024",
+        "paper_octo_2024"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "action_discretization_and_tokenization",
+      "title_zh": "可执行动作离散化与 Tokenization",
+      "title_en": "Executable Action Discretization and Tokenization",
+      "module_id": "action_representation_generation",
+      "order": 2,
+      "priority": "P0",
+      "priority_reason": "动作 tokenization 是 VLM-style 自回归 VLA 的核心接口，也是高频控制、效率和跨本体设计反复讨论的问题。",
+      "stability": "foundation",
+      "scope": "学习连续动作逐维分箱、离散 vocab、token 到连续控制值的映射、量化误差和序列长度；这里的 action token 专指可执行低层动作编码，与广义“中间 action tokens”分开。",
+      "prerequisites": [
+        "transformer_policy_sequence_modeling",
+        "action_space_and_control_parameterization"
+      ],
+      "related_concepts": [
+        "compressed_action_tokenization",
+        "autoregressive_action_generation",
+        "intermediate_action_abstractions"
+      ],
+      "learning_goals": [
+        "能解释 RT-2/OpenVLA 类离散动作 token 的编码与解码过程。",
+        "能分析 bin 数、动作维度、控制频率和 token 序列长度之间的权衡。"
+      ],
+      "recognition_keywords": [
+        "action tokenization",
+        "action discretization",
+        "action binning",
+        "action vocabulary",
+        "quantization",
+        "discrete action tokens"
+      ],
+      "representative_works": [
+        "RT-2",
+        "OpenVLA",
+        "FAST"
+      ],
+      "source_ids": [
+        "survey_action_tokenization_2025",
+        "survey_real_world_2025",
+        "paper_rt2_2023",
+        "paper_openvla_2024",
+        "paper_fast_2025"
+      ],
+      "estimated_card_minutes": 5
+    },
+    {
+      "id": "compressed_action_tokenization",
+      "title_zh": "压缩式动作 Tokenization",
+      "title_en": "Compressed Action Tokenization",
+      "module_id": "action_representation_generation",
+      "order": 5,
+      "priority": "P1",
+      "priority_reason": "这一机制已形成清晰技术方向但仍快速演进，值得系统掌握而不应被固定为唯一 action tokenizer。",
+      "stability": "evolving",
+      "scope": "学习先在时间/频率域压缩 action chunk 再量化/编码的思路，以及 DCT、BPE/通用 tokenizer 类机制为何缓解高频动作序列过长；不把 FAST 的具体超参数当作固定知识。",
+      "prerequisites": [
+        "action_discretization_and_tokenization",
+        "action_chunking_and_horizon"
+      ],
+      "related_concepts": [
+        "autoregressive_action_generation",
+        "real_time_inference_and_control_frequency"
+      ],
+      "learning_goals": [
+        "能解释简单 per-dimension binning 在高频灵巧动作上的瓶颈。",
+        "能说明压缩 tokenization 如何改变序列长度、训练速度与可迁移性。"
+      ],
+      "recognition_keywords": [
+        "FAST",
+        "FAST+",
+        "DCT",
+        "frequency-space action tokenization",
+        "BPE",
+        "action compression"
+      ],
+      "representative_works": [
+        "FAST"
+      ],
+      "source_ids": [
+        "paper_fast_2025",
+        "survey_action_tokenization_2025",
+        "survey_real_world_2025"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "continuous_action_decoding",
+      "title_zh": "连续动作解码",
+      "title_en": "Continuous Action Decoding",
+      "module_id": "action_representation_generation",
+      "order": 3,
+      "priority": "P1",
+      "priority_reason": "连续输出是与 tokenized AR 同等重要的基础分支，帮助统一理解 regression、diffusion 和 flow action heads。",
+      "stability": "foundation",
+      "scope": "学习直接 regression/MLP 或生成式 action head 输出连续动作的基本方式，理解 L1/L2、分布建模与连续控制输出的接口；不把 diffusion/flow 的生成过程重复塞进本节点。",
+      "prerequisites": [
+        "action_space_and_control_parameterization",
+        "transformer_policy_sequence_modeling"
+      ],
+      "related_concepts": [
+        "diffusion_action_generation",
+        "flow_matching_action_generation",
+        "dual_system_action_expert_architecture"
+      ],
+      "learning_goals": [
+        "能区分离散 token 解码和直接连续 action head。",
+        "能判断论文中的 action head 是点估计、参数化分布还是迭代生成器。"
+      ],
+      "recognition_keywords": [
+        "continuous action",
+        "action regression",
+        "MLP head",
+        "L1 loss",
+        "L2 loss",
+        "continuous decoder"
+      ],
+      "representative_works": [
+        "OpenVLA-OFT",
+        "π₀"
+      ],
+      "source_ids": [
+        "survey_real_world_2025",
+        "paper_pi0_2025",
+        "repo_awesome_vla_robotics_2026"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "action_chunking_and_horizon",
+      "title_zh": "Action Chunking 与预测时域",
+      "title_en": "Action Chunking and Prediction Horizon",
+      "module_id": "action_representation_generation",
+      "order": 4,
+      "priority": "P0",
+      "priority_reason": "action chunk 已跨 Transformer、diffusion、flow VLA 重复出现，是理解低层策略和实时执行的共同机制。",
+      "stability": "foundation",
+      "scope": "学习一次预测多步动作、observation/action horizon、temporal aggregation/receding horizon 及其对误差累积、平滑性和延迟的影响；不把具体 chunk 长度当通用结论。",
+      "prerequisites": [
+        "behavior_cloning_for_vla",
+        "action_space_and_control_parameterization"
+      ],
+      "related_concepts": [
+        "compressed_action_tokenization",
+        "diffusion_action_generation",
+        "flow_matching_action_generation",
+        "asynchronous_chunk_execution_and_replanning"
+      ],
+      "learning_goals": [
+        "能解释 chunking 为什么常比逐步动作预测更稳定，同时为什么 chunk 太长会降低反馈响应性。",
+        "能区分训练时 action chunk、部署时执行窗口和重规划频率。"
+      ],
+      "recognition_keywords": [
+        "action chunking",
+        "action horizon",
+        "prediction horizon",
+        "temporal aggregation",
+        "receding horizon",
+        "action chunk"
+      ],
+      "representative_works": [
+        "ACT",
+        "Diffusion Policy",
+        "OpenVLA-OFT"
+      ],
+      "source_ids": [
+        "paper_act_2023",
+        "paper_diffusion_policy_2023",
+        "survey_real_world_2025",
+        "repo_awesome_vla_robotics_2026"
+      ],
+      "estimated_card_minutes": 5
+    },
+    {
+      "id": "autoregressive_action_generation",
+      "title_zh": "自回归动作生成",
+      "title_en": "Autoregressive Action Generation",
+      "module_id": "action_representation_generation",
+      "order": 6,
+      "priority": "P0",
+      "priority_reason": "AR 是现代 VLA 最主要的动作生成范式之一，也是理解其与 LLM/VLM 统一建模关系的核心。",
+      "stability": "foundation",
+      "scope": "学习按 token/维度/时间因果生成动作的训练与推理方式、teacher forcing、exposure/latency 问题和与语言模型统一 vocab 的优势；不展开通用 LLM decoding 技巧。",
+      "prerequisites": [
+        "transformer_policy_sequence_modeling",
+        "action_discretization_and_tokenization"
+      ],
+      "related_concepts": [
+        "diffusion_action_generation",
+        "flow_matching_action_generation",
+        "real_time_inference_and_control_frequency"
+      ],
+      "learning_goals": [
+        "能读懂 AR VLA 的 factorization、训练损失和动作解码循环。",
+        "能解释 AR 的统一 token 接口为何方便 VLM 迁移，同时会受序列长度与串行延迟限制。"
+      ],
+      "recognition_keywords": [
+        "autoregressive",
+        "next-token prediction",
+        "causal decoding",
+        "action tokens",
+        "cross-entropy",
+        "teacher forcing"
+      ],
+      "representative_works": [
+        "RT-2",
+        "OpenVLA",
+        "FAST"
+      ],
+      "source_ids": [
+        "paper_rt2_2023",
+        "paper_openvla_2024",
+        "paper_fast_2025",
+        "survey_real_world_2025"
+      ],
+      "estimated_card_minutes": 5
+    },
+    {
+      "id": "diffusion_action_generation",
+      "title_zh": "Diffusion 动作生成",
+      "title_en": "Diffusion Action Generation",
+      "module_id": "action_representation_generation",
+      "order": 7,
+      "priority": "P0",
+      "priority_reason": "Diffusion 已成为 VLA/action expert 的主流生成机制之一，理解它是阅读大量 2024–2026 工作的必要能力。",
+      "stability": "foundation",
+      "scope": "学习条件 diffusion policy 对 action chunk 分布建模、前向加噪/反向去噪、训练目标、多模态动作优势与迭代采样成本；不展开图像 diffusion 的全部理论。",
+      "prerequisites": [
+        "behavior_cloning_for_vla",
+        "action_space_and_control_parameterization",
+        "action_chunking_and_horizon"
+      ],
+      "related_concepts": [
+        "flow_matching_action_generation",
+        "dual_system_action_expert_architecture",
+        "real_time_inference_and_control_frequency"
+      ],
+      "learning_goals": [
+        "能解释为什么机器人动作常是多模态分布以及 diffusion 如何避免简单回归平均化。",
+        "能从采样步数、horizon、控制频率分析 diffusion VLA 的部署代价。"
+      ],
+      "recognition_keywords": [
+        "Diffusion Policy",
+        "denoising",
+        "score model",
+        "diffusion transformer",
+        "DiT",
+        "multimodal action distribution"
+      ],
+      "representative_works": [
+        "Diffusion Policy",
+        "Octo",
+        "GR00T N1"
+      ],
+      "source_ids": [
+        "paper_diffusion_policy_2023",
+        "paper_octo_2024",
+        "paper_groot_n1_2025",
+        "survey_real_world_2025"
+      ],
+      "estimated_card_minutes": 5
+    },
+    {
+      "id": "flow_matching_action_generation",
+      "title_zh": "Flow Matching 动作生成",
+      "title_en": "Flow Matching Action Generation",
+      "module_id": "action_representation_generation",
+      "order": 8,
+      "priority": "P1",
+      "priority_reason": "Flow matching 已有代表性通用 VLA 采用，但动作生成范式仍快速演进，因此放 P1/evolving 而非固定成基础唯一答案。",
+      "stability": "evolving",
+      "scope": "学习 conditional flow matching/continuous flow 作为动作生成器的直观目标、与 diffusion 的关系、采样步数和连续 action chunk 接口；不追求所有 ODE/概率流数学细节。",
+      "prerequisites": [
+        "action_space_and_control_parameterization",
+        "action_chunking_and_horizon"
+      ],
+      "related_concepts": [
+        "diffusion_action_generation",
+        "dual_system_action_expert_architecture",
+        "real_time_inference_and_control_frequency"
+      ],
+      "learning_goals": [
+        "能解释 flow matching action expert 在训练目标和推理轨迹上与 diffusion/AR 的主要差别。",
+        "能读懂 π₀ 类 VLA 为什么选择 flow matching 生成连续动作。"
+      ],
+      "recognition_keywords": [
+        "flow matching",
+        "conditional flow matching",
+        "action expert",
+        "ODE",
+        "continuous flow",
+        "π0"
+      ],
+      "representative_works": [
+        "π₀"
+      ],
+      "source_ids": [
+        "paper_pi0_2025",
+        "survey_real_world_2025",
+        "survey_large_vlm_2025"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "monolithic_vla_architecture",
+      "title_zh": "单体式 VLA 架构",
+      "title_en": "Monolithic VLA Architecture",
+      "module_id": "architecture_systems",
+      "order": 1,
+      "priority": "P1",
+      "priority_reason": "这是理解现代 VLA 架构谱系的重要参照，但“单体/双系统”是分析框架而非所有论文都使用的原生术语，因此不升为 P0。",
+      "stability": "evolving",
+      "scope": "学习感知、语言理解与动作生成在单一主干/紧密端到端系统中的耦合方式，包括单系统 token 输出和共享表征；不以任何单个模型作为模板。",
+      "prerequisites": [
+        "vlm_backbone_and_robotic_grounding",
+        "multimodal_fusion_and_token_interface",
+        "action_space_and_control_parameterization"
+      ],
+      "related_concepts": [
+        "dual_system_action_expert_architecture",
+        "hierarchical_planner_policy_architecture"
+      ],
+      "learning_goals": [
+        "能把一个 VLA 判断为单体式并描述共享参数/latent 对动作产生的路径。",
+        "能分析端到端耦合在知识迁移、动作精度、调试和计算上的利弊。"
+      ],
+      "recognition_keywords": [
+        "monolithic VLA",
+        "single-system",
+        "end-to-end VLA",
+        "shared backbone",
+        "unified model"
+      ],
+      "representative_works": [
+        "RT-2",
+        "OpenVLA"
+      ],
+      "source_ids": [
+        "survey_large_vlm_2025",
+        "survey_real_world_2025",
+        "paper_rt2_2023",
+        "paper_openvla_2024"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "dual_system_action_expert_architecture",
+      "title_zh": "双系统与 Action Expert 架构",
+      "title_en": "Dual-System and Action-Expert Architecture",
+      "module_id": "architecture_systems",
+      "order": 2,
+      "priority": "P1",
+      "priority_reason": "该形态已成为重要架构路线，直接关联连续动作和实时性，但具体耦合方式仍快速演进。",
+      "stability": "evolving",
+      "scope": "学习慢速 VLM/语义系统与快速动作 expert（diffusion/flow/DiT 等）的紧耦合接口、条件 latent、联合训练与频率分工；不把认知科学 System 1/2 类比当作严格理论。",
+      "prerequisites": [
+        "vlm_backbone_and_robotic_grounding",
+        "multimodal_fusion_and_token_interface",
+        "action_space_and_control_parameterization"
+      ],
+      "related_concepts": [
+        "monolithic_vla_architecture",
+        "flow_matching_action_generation",
+        "diffusion_action_generation",
+        "real_time_inference_and_control_frequency"
+      ],
+      "learning_goals": [
+        "能画出 VLM backbone 到 action expert 的信息瓶颈和梯度路径。",
+        "能比较 dual-system 与单体 AR 在语义容量、动作频率和模块专门化上的取舍。"
+      ],
+      "recognition_keywords": [
+        "dual-system",
+        "action expert",
+        "System 1",
+        "System 2",
+        "DiT action head",
+        "fast-slow VLA"
+      ],
+      "representative_works": [
+        "π₀",
+        "GR00T N1",
+        "CogACT"
+      ],
+      "source_ids": [
+        "survey_large_vlm_2025",
+        "survey_real_world_2025",
+        "paper_pi0_2025",
+        "paper_groot_n1_2025"
+      ],
+      "estimated_card_minutes": 5
+    },
+    {
+      "id": "hierarchical_planner_policy_architecture",
+      "title_zh": "层级 Planner–Policy 架构",
+      "title_en": "Hierarchical Planner–Policy Architecture",
+      "module_id": "architecture_systems",
+      "order": 3,
+      "priority": "P1",
+      "priority_reason": "长时程任务常需要层级接口；理解这一架构有助于读论文和系统项目，但并非所有 VLA 的必要骨架。",
+      "stability": "evolving",
+      "scope": "学习显式将高层任务/子目标规划与低层执行策略解耦的架构，包括 planner-only、planner+policy、技能选择和层级条件；不展开通用 LLM agent orchestration。",
+      "prerequisites": [
+        "vla_problem_formulation",
+        "language_conditioning_and_grounding",
+        "action_space_and_control_parameterization"
+      ],
+      "related_concepts": [
+        "intermediate_action_abstractions",
+        "reasoning_for_action_and_spatial_grounding",
+        "world_model_vla_interface"
+      ],
+      "learning_goals": [
+        "能区分层级式 VLA 与仅具有内部 latent action expert 的双系统。",
+        "能分析显式中间目标对长时程、可解释性、模块替换和误差传播的影响。"
+      ],
+      "recognition_keywords": [
+        "hierarchical VLA",
+        "planner-policy",
+        "task planner",
+        "skill policy",
+        "subtask decomposition",
+        "high-level policy"
+      ],
+      "representative_works": [
+        "SayCan",
+        "NaVILA",
+        "Hi Robot"
+      ],
+      "source_ids": [
+        "survey_ma_2026",
+        "survey_large_vlm_2025",
+        "repo_awesome_vla_robotics_2026"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "intermediate_action_abstractions",
+      "title_zh": "中间动作抽象",
+      "title_en": "Intermediate Action Abstractions",
+      "module_id": "architecture_systems",
+      "order": 4,
+      "priority": "P1",
+      "priority_reason": "专项 action-token 综述显示社区对“action token”口径很宽；独立此节点可防止与低层离散 token 混淆，并覆盖层级 VLA 的核心接口。",
+      "stability": "evolving",
+      "scope": "学习 language action、code、affordance、keypoint/trajectory、goal state、skill/latent 等位于语言理解与原始控制之间的表示；明确这与“低层动作离散 tokenization”不是同义词。",
+      "prerequisites": [
+        "language_conditioning_and_grounding",
+        "action_space_and_control_parameterization"
+      ],
+      "related_concepts": [
+        "action_discretization_and_tokenization",
+        "hierarchical_planner_policy_architecture",
+        "world_model_vla_interface"
+      ],
+      "learning_goals": [
+        "能识别论文的中间输出到底是可执行动作、子目标、轨迹、affordance 还是 latent skill。",
+        "能说明不同抽象层级如何改变监督数据、可解释性和跨本体迁移。"
+      ],
+      "recognition_keywords": [
+        "affordance",
+        "keypoint",
+        "trajectory token",
+        "goal state",
+        "language action",
+        "code action",
+        "latent skill",
+        "mid-level action"
+      ],
+      "representative_works": [
+        "SayCan",
+        "NaVILA",
+        "CoT-VLA"
+      ],
+      "source_ids": [
+        "survey_action_tokenization_2025",
+        "survey_ma_2026",
+        "survey_large_vlm_2025"
+      ],
+      "estimated_card_minutes": 5
+    },
+    {
+      "id": "reasoning_for_action_and_spatial_grounding",
+      "title_zh": "面向动作的推理与空间 Grounding",
+      "title_en": "Reasoning for Action and Spatial Grounding",
+      "module_id": "architecture_systems",
+      "order": 5,
+      "priority": "P1",
+      "priority_reason": "推理正变得重要，但效果与实现仍高度依任务；保持 P1/evolving 防止把短期 CoT 热点误当基础。",
+      "stability": "evolving",
+      "scope": "学习显式/隐式 embodied reasoning、空间关系、未来目标或 reasoning token 如何服务动作选择，并评估 reasoning 是否真正改善闭环执行；不把通用 Chain-of-Thought 当作必然正确或必须暴露的机制。",
+      "prerequisites": [
+        "vlm_backbone_and_robotic_grounding",
+        "language_conditioning_and_grounding",
+        "multimodal_fusion_and_token_interface"
+      ],
+      "related_concepts": [
+        "hierarchical_planner_policy_architecture",
+        "intermediate_action_abstractions",
+        "failure_modes_and_reliability"
+      ],
+      "learning_goals": [
+        "能区分语义问答能力、空间 grounding 与实际 action success 的证据。",
+        "能审查 reasoning 中间表示的监督成本、延迟、可解释性和闭环收益。"
+      ],
+      "recognition_keywords": [
+        "embodied reasoning",
+        "spatial reasoning",
+        "reasoning token",
+        "visual CoT",
+        "goal prediction",
+        "grounded reasoning"
+      ],
+      "representative_works": [
+        "RT-2",
+        "Gemini Robotics",
+        "CoT-VLA"
+      ],
+      "source_ids": [
+        "survey_large_vlm_2025",
+        "survey_action_tokenization_2025",
+        "paper_rt2_2023",
+        "paper_gemini_robotics_2025"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "world_model_vla_interface",
+      "title_zh": "World Model 与 VLA 的接口",
+      "title_en": "World Model–VLA Interface",
+      "module_id": "architecture_systems",
+      "order": 6,
+      "priority": "P2",
+      "priority_reason": "与 VLA 的耦合是活跃前沿，但尚未成为所有主流 VLA 的共同组成，因此严格限定为接口型 P2/frontier。",
+      "stability": "frontier",
+      "scope": "只学习 world/dynamics model 与 VLA 的直接接口：预测未来观测/latent、为规划或动作选择提供 imagined outcomes、辅助数据/后训练；不展开 world model 完整课程、视频生成或通用 model-based RL。",
+      "prerequisites": [
+        "vla_problem_formulation",
+        "temporal_context_and_observation_history",
+        "action_space_and_control_parameterization"
+      ],
+      "related_concepts": [
+        "intermediate_action_abstractions",
+        "human_video_and_latent_action_learning",
+        "simulation_augmentation_and_sim2real"
+      ],
+      "learning_goals": [
+        "能识别某论文中的 world model 是独立规划器、辅助预测头还是训练数据生成器。",
+        "能说明引入 world model 可能带来的规划能力和模型偏差/计算成本。"
+      ],
+      "recognition_keywords": [
+        "world model",
+        "dynamics model",
+        "future prediction",
+        "imagination",
+        "latent dynamics",
+        "model-based planning"
+      ],
+      "representative_works": [
+        "DreamVLA",
+        "Genie Envisioner"
+      ],
+      "source_ids": [
+        "survey_ma_2026",
+        "survey_large_vlm_2025",
+        "course_eth_robot_learning_2026",
+        "repo_awesome_vla_robotics_2026"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "robot_data_and_trajectory_schema",
+      "title_zh": "机器人数据与轨迹 Schema",
+      "title_en": "Robot Data and Trajectory Schema",
+      "module_id": "training_data",
+      "order": 1,
+      "priority": "P0",
+      "priority_reason": "VLA 的核心瓶颈是异构机器人轨迹；没有 schema 认知就无法正确读训练代码、数据混合或跨本体论文。",
+      "stability": "foundation",
+      "scope": "学习 episode/trajectory 中图像、语言、state、action、时间戳、任务元数据的对齐和常见统一格式思想（如 RLDS/OXE 风格）；不展开数据库系统或单一框架 API。",
+      "prerequisites": [
+        "behavior_cloning_for_vla",
+        "action_space_and_control_parameterization"
+      ],
+      "related_concepts": [
+        "data_collection_and_demonstration_quality",
+        "dataset_mixture_and_sampling",
+        "cross_embodiment_training_and_action_alignment"
+      ],
+      "learning_goals": [
+        "能检查一个 VLA 数据集的时间对齐、action convention、terminal/task metadata 是否足够训练。",
+        "能将多机器人数据映射到统一 trajectory schema，并识别仍未被统一的 embodiment-specific 字段。"
+      ],
+      "recognition_keywords": [
+        "trajectory",
+        "episode",
+        "RLDS",
+        "Open X-Embodiment",
+        "observation-action alignment",
+        "dataset schema"
+      ],
+      "representative_works": [
+        "Open X-Embodiment",
+        "OpenVLA"
+      ],
+      "source_ids": [
+        "paper_open_x_embodiment_2024",
+        "survey_real_world_2025",
+        "paper_openvla_2024"
+      ],
+      "estimated_card_minutes": 5
+    },
+    {
+      "id": "data_collection_and_demonstration_quality",
+      "title_zh": "数据采集与示范质量",
+      "title_en": "Data Collection and Demonstration Quality",
+      "module_id": "training_data",
+      "order": 2,
+      "priority": "P1",
+      "priority_reason": "真实项目的表现高度依赖示范采集与质量；属于经常遇到的工程核心，但不是论文阅读最低前置。",
+      "stability": "foundation",
+      "scope": "学习 teleoperation、kinesthetic/proxy interfaces、成功/失败示范、覆盖度、一致性、控制频率和标签质量如何影响模仿学习；不展开硬件遥操作设计。",
+      "prerequisites": [
+        "robot_data_and_trajectory_schema"
+      ],
+      "related_concepts": [
+        "dataset_mixture_and_sampling",
+        "failure_modes_and_reliability",
+        "vla_post_training_with_rl"
+      ],
+      "learning_goals": [
+        "能从策略失败反推可能的数据覆盖/一致性问题。",
+        "能比较更多低质量数据与较少高质量示范对 downstream fine-tuning 的不同风险。"
+      ],
+      "recognition_keywords": [
+        "teleoperation",
+        "demonstration quality",
+        "data coverage",
+        "trajectory quality",
+        "human demonstration",
+        "data collection"
+      ],
+      "representative_works": [
+        "ALOHA/ACT",
+        "DROID",
+        "Open X-Embodiment"
+      ],
+      "source_ids": [
+        "survey_real_world_2025",
+        "paper_act_2023",
+        "paper_open_x_embodiment_2024"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "dataset_mixture_and_sampling",
+      "title_zh": "多数据集混合与采样",
+      "title_en": "Dataset Mixture and Sampling",
+      "module_id": "training_data",
+      "order": 3,
+      "priority": "P1",
+      "priority_reason": "跨源混合是 generalist VLA 的关键工程变量，但最佳策略仍在变化，因此为 P1/evolving。",
+      "stability": "evolving",
+      "scope": "学习跨数据集 mixture、任务/机器人/数据源采样权重、归一化、数据规模不平衡和 quality filtering；不固定某个配比为通用配方。",
+      "prerequisites": [
+        "robot_data_and_trajectory_schema"
+      ],
+      "related_concepts": [
+        "cross_embodiment_training_and_action_alignment",
+        "pretraining_cotuning_and_auxiliary_objectives",
+        "generalization_taxonomy"
+      ],
+      "learning_goals": [
+        "能解释大数据集为何可能淹没小而关键的 embodiment/task。",
+        "能设计并审查 mixture sampling 的基本 ablation：规模、权重、质量与多样性。"
+      ],
+      "recognition_keywords": [
+        "dataset mixture",
+        "mixture weights",
+        "sampling strategy",
+        "data balancing",
+        "data filtering",
+        "multi-dataset training"
+      ],
+      "representative_works": [
+        "Open X-Embodiment",
+        "Octo",
+        "GR00T N1"
+      ],
+      "source_ids": [
+        "survey_real_world_2025",
+        "paper_open_x_embodiment_2024",
+        "paper_octo_2024",
+        "paper_groot_n1_2025"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "cross_embodiment_training_and_action_alignment",
+      "title_zh": "跨本体训练与动作对齐",
+      "title_en": "Cross-Embodiment Training and Action Alignment",
+      "module_id": "training_data",
+      "order": 4,
+      "priority": "P0",
+      "priority_reason": "现代 VLA 的“generalist”核心含义之一就是跨机器人数据利用；它反复影响数据、架构、微调和泛化。",
+      "stability": "evolving",
+      "scope": "学习不同机器人在 observation/state/action space、频率、坐标系、DoF 上的异构性，以及统一 schema、embodiment conditioning、action normalization/heads 等对齐策略；不展开具体机器人运动学。",
+      "prerequisites": [
+        "action_space_and_control_parameterization",
+        "robot_data_and_trajectory_schema"
+      ],
+      "related_concepts": [
+        "dataset_mixture_and_sampling",
+        "downstream_finetuning_and_peft",
+        "generalization_taxonomy"
+      ],
+      "learning_goals": [
+        "能解释“同一语言技能”为什么不能直接等同于“同一低层动作标签”。",
+        "能审查一个 cross-embodiment 训练方案如何处理 action/state 维度和坐标差异。"
+      ],
+      "recognition_keywords": [
+        "cross-embodiment",
+        "embodiment transfer",
+        "action alignment",
+        "embodiment conditioning",
+        "heterogeneous robots",
+        "RT-X"
+      ],
+      "representative_works": [
+        "Open X-Embodiment",
+        "Octo",
+        "π₀",
+        "Gemini Robotics"
+      ],
+      "source_ids": [
+        "paper_open_x_embodiment_2024",
+        "paper_octo_2024",
+        "paper_pi0_2025",
+        "survey_real_world_2025"
+      ],
+      "estimated_card_minutes": 5
+    },
+    {
+      "id": "pretraining_cotuning_and_auxiliary_objectives",
+      "title_zh": "预训练、Co-training 与辅助目标",
+      "title_en": "Pretraining, Co-training and Auxiliary Objectives",
+      "module_id": "training_data",
+      "order": 5,
+      "priority": "P1",
+      "priority_reason": "不同论文对“pretrain/post-train”命名不统一；建立阶段化词汇能显著提高论文阅读和技术表达准确性。",
+      "stability": "evolving",
+      "scope": "区分 VLM 预训练、机器人策略预训练、web/VQA/robot co-training、视觉/语言/视频/自监督辅助目标，理解哪些目标保留语义知识、哪些建立 action grounding；不展开 foundation model 全部预训练配方。",
+      "prerequisites": [
+        "vlm_backbone_and_robotic_grounding",
+        "robot_data_and_trajectory_schema"
+      ],
+      "related_concepts": [
+        "dataset_mixture_and_sampling",
+        "downstream_finetuning_and_peft",
+        "human_video_and_latent_action_learning"
+      ],
+      "learning_goals": [
+        "能在论文中准确区分 pretraining、co-fine-tuning、co-training 与 downstream fine-tuning。",
+        "能解释混入非机器人视觉语言数据的目标是知识保留/语义迁移而非直接提供动作监督。"
+      ],
+      "recognition_keywords": [
+        "pretraining",
+        "co-training",
+        "co-fine-tuning",
+        "auxiliary objective",
+        "VQA",
+        "web data",
+        "self-supervised pretraining"
+      ],
+      "representative_works": [
+        "RT-2",
+        "OpenVLA",
+        "π₀"
+      ],
+      "source_ids": [
+        "paper_rt2_2023",
+        "paper_openvla_2024",
+        "paper_pi0_2025",
+        "survey_real_world_2025"
+      ],
+      "estimated_card_minutes": 5
+    },
+    {
+      "id": "downstream_finetuning_and_peft",
+      "title_zh": "下游微调与参数高效适配",
+      "title_en": "Downstream Fine-Tuning and PEFT",
+      "module_id": "training_data",
+      "order": 6,
+      "priority": "P0",
+      "priority_reason": "参与 VLA 项目最常见的入口不是从零预训练而是下游适配；因此保持 P0，即便具体 PEFT 技术会变化。",
+      "stability": "evolving",
+      "scope": "学习 full fine-tuning、冻结 backbone/只训 action head、LoRA/PEFT、少量 in-domain 数据适配、学习率与知识遗忘风险；不展开 PEFT 的所有 NLP 变体。",
+      "prerequisites": [
+        "vlm_backbone_and_robotic_grounding",
+        "robot_data_and_trajectory_schema"
+      ],
+      "related_concepts": [
+        "cross_embodiment_training_and_action_alignment",
+        "vla_post_training_with_rl",
+        "efficiency_compression_and_on_device"
+      ],
+      "learning_goals": [
+        "能为 released VLA 选择 full/head-only/LoRA 等适配方案并说明依据。",
+        "能识别 catastrophic forgetting、视觉语言知识退化和 robot action overfit 的风险。"
+      ],
+      "recognition_keywords": [
+        "fine-tuning",
+        "PEFT",
+        "LoRA",
+        "adapter",
+        "action-head tuning",
+        "catastrophic forgetting",
+        "knowledge insulation"
+      ],
+      "representative_works": [
+        "OpenVLA",
+        "Octo"
+      ],
+      "source_ids": [
+        "paper_openvla_2024",
+        "paper_octo_2024",
+        "survey_real_world_2025",
+        "repo_awesome_vla_official_2026"
+      ],
+      "estimated_card_minutes": 5
+    },
+    {
+      "id": "vla_post_training_with_rl",
+      "title_zh": "VLA 的 RL / 交互式 Post-training",
+      "title_en": "RL and Interactive Post-Training for VLA",
+      "module_id": "training_data",
+      "order": 7,
+      "priority": "P1",
+      "priority_reason": "RL 后训练正在快速进入 VLA，但尚未像 BC/fine-tuning 一样成为所有系统的共同必需步骤，因此放 P1/evolving。",
+      "stability": "evolving",
+      "scope": "只学习 VLA 后训练真正需要的 RL 角色：在 BC/SFT 后用离线/在线/人机交互奖励进一步优化成功率、精度和恢复；理解策略梯度/actor-critic/reward 只到可读论文程度，不展开完整 RL 课程。",
+      "prerequisites": [
+        "behavior_cloning_for_vla",
+        "downstream_finetuning_and_peft"
+      ],
+      "related_concepts": [
+        "data_collection_and_demonstration_quality",
+        "failure_modes_and_reliability"
+      ],
+      "learning_goals": [
+        "能解释为什么 RL 被用于突破 demonstration ceiling，以及真实机器人 RL 的样本效率与安全约束。",
+        "能区分 VLA 端到端 RL fine-tuning 与“VLA 高层规划 + 独立 RL 低层策略”。"
+      ],
+      "recognition_keywords": [
+        "post-training",
+        "reinforced fine-tuning",
+        "RL fine-tuning",
+        "offline RL",
+        "online RL",
+        "human-in-the-loop RL",
+        "policy optimization"
+      ],
+      "representative_works": [
+        "ConRFT",
+        "RIPT-VLA",
+        "VLA-RL"
+      ],
+      "source_ids": [
+        "survey_real_world_2025",
+        "survey_large_vlm_2025",
+        "course_eth_robot_learning_2026",
+        "course_cornell_robot_learning_2026",
+        "repo_awesome_vla_official_2026"
+      ],
+      "estimated_card_minutes": 5
+    },
+    {
+      "id": "human_video_and_latent_action_learning",
+      "title_zh": "人类视频与 Latent Action 学习",
+      "title_en": "Human Video and Latent Action Learning",
+      "module_id": "training_data",
+      "order": 8,
+      "priority": "P2",
+      "priority_reason": "数据规模潜力很大但 latent 定义、对齐方法与可靠性仍不统一，适合作为 research-path 的 P2/frontier。",
+      "stability": "frontier",
+      "scope": "学习如何从无机器人动作标签的人类/互联网视频中学习 action-relevant latent、inverse dynamics 或中间技能，再适配到机器人；不把视频理解或 world model 全部纳入。",
+      "prerequisites": [
+        "temporal_context_and_observation_history",
+        "robot_data_and_trajectory_schema"
+      ],
+      "related_concepts": [
+        "pretraining_cotuning_and_auxiliary_objectives",
+        "world_model_vla_interface",
+        "cross_embodiment_training_and_action_alignment"
+      ],
+      "learning_goals": [
+        "能解释为什么 action-free human video 能扩展数据规模，以及缺失 embodiment-specific 控制标签带来的对齐难题。",
+        "能区分 latent action pretraining 与直接监督 raw robot action。"
+      ],
+      "recognition_keywords": [
+        "human video",
+        "latent action",
+        "action-free video",
+        "inverse dynamics",
+        "video pretraining",
+        "embodiment-agnostic latent"
+      ],
+      "representative_works": [
+        "GR00T N1",
+        "UniVLA",
+        "EgoVLA"
+      ],
+      "source_ids": [
+        "survey_action_tokenization_2025",
+        "survey_large_vlm_2025",
+        "paper_groot_n1_2025",
+        "repo_awesome_vla_robotics_2026"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "simulation_augmentation_and_sim2real",
+      "title_zh": "仿真增强与 Sim2Real",
+      "title_en": "Simulation Augmentation and Sim2Real",
+      "module_id": "training_data",
+      "order": 9,
+      "priority": "P1",
+      "priority_reason": "VLA 数据扩展和可重复评测越来越依赖仿真，但是否能迁移到真实机器人仍是持续变化的工程问题。",
+      "stability": "evolving",
+      "scope": "学习 synthetic/sim robot trajectories、domain randomization/real-to-sim 与真实数据混合如何缓解数据成本，并关注视觉/动力学/接触 gap；不展开 simulator API 或完整 sim2real 研究史。",
+      "prerequisites": [
+        "robot_data_and_trajectory_schema",
+        "data_collection_and_demonstration_quality"
+      ],
+      "related_concepts": [
+        "dataset_mixture_and_sampling",
+        "generalization_taxonomy",
+        "benchmarks_and_evaluation_protocols"
+      ],
+      "learning_goals": [
+        "能判断仿真数据在 VLA 中是预训练、augmentation、benchmark 还是真实策略替代。",
+        "能列出 sim-to-real gap 的主要来源并设计真实机器人验证以避免只看模拟成功率。"
+      ],
+      "recognition_keywords": [
+        "simulation data",
+        "synthetic data",
+        "Sim2Real",
+        "domain randomization",
+        "real-to-sim",
+        "sim-to-real gap"
+      ],
+      "representative_works": [
+        "GR00T N1",
+        "SIMPLER"
+      ],
+      "source_ids": [
+        "survey_real_world_2025",
+        "course_cornell_robot_learning_2026",
+        "paper_groot_n1_2025"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "generalization_taxonomy",
+      "title_zh": "VLA 泛化维度与迁移分类",
+      "title_en": "VLA Generalization and Transfer Taxonomy",
+      "module_id": "generalization_evaluation",
+      "order": 1,
+      "priority": "P0",
+      "priority_reason": "VLA 的核心卖点是泛化；没有明确 taxonomy 就无法严谨比较模型或进行技术表达，因此为 P0。",
+      "stability": "foundation",
+      "scope": "学习按新对象、场景、语言指令、任务组合、机器人本体/动作空间和数据域区分 generalization/transfer，并区分 zero-shot、few-shot 与 fine-tuned adaptation；不把所有领域泛化理论展开。",
+      "prerequisites": [
+        "vla_problem_formulation",
+        "robot_data_and_trajectory_schema"
+      ],
+      "related_concepts": [
+        "cross_embodiment_training_and_action_alignment",
+        "benchmarks_and_evaluation_protocols",
+        "failure_modes_and_reliability"
+      ],
+      "learning_goals": [
+        "能把论文声称的“generalization”精确标注为哪一个维度和适配设置。",
+        "能避免把训练集内新摆放、同本体新对象和跨本体迁移混为一谈。"
+      ],
+      "recognition_keywords": [
+        "generalization",
+        "transfer",
+        "zero-shot",
+        "few-shot",
+        "OOD",
+        "cross-task",
+        "cross-environment",
+        "cross-embodiment"
+      ],
+      "representative_works": [
+        "RT-2",
+        "Open X-Embodiment",
+        "OpenVLA",
+        "Gemini Robotics"
+      ],
+      "source_ids": [
+        "survey_real_world_2025",
+        "paper_rt2_2023",
+        "paper_open_x_embodiment_2024",
+        "paper_openvla_2024",
+        "paper_gemini_robotics_2025"
+      ],
+      "estimated_card_minutes": 5
+    },
+    {
+      "id": "benchmarks_and_evaluation_protocols",
+      "title_zh": "Benchmark 与评测协议",
+      "title_en": "Benchmarks and Evaluation Protocols",
+      "module_id": "generalization_evaluation",
+      "order": 2,
+      "priority": "P0",
+      "priority_reason": "论文阅读和技术表达不仅要看模型，还要审查评测证据；这是避免被不可比 success rate 误导的 P0 能力。",
+      "stability": "foundation",
+      "scope": "学习任务成功率之外的 trial 设计、seen/unseen split、真实 vs 仿真、控制预算、人工复核、置信区间与常见 benchmark（如 LIBERO、CALVIN、SIMPLER、RoboCasa 等）的用途边界；不背排行榜。",
+      "prerequisites": [
+        "generalization_taxonomy"
+      ],
+      "related_concepts": [
+        "simulation_augmentation_and_sim2real",
+        "failure_modes_and_reliability"
+      ],
+      "learning_goals": [
+        "能判断两个 VLA 结果是否真的可直接比较，并识别 benchmark、机器人、数据和 evaluation protocol 的差异。",
+        "能为项目设计最小可复现评测：任务分层、trial 数、随机化、成功判定和失败分类。"
+      ],
+      "recognition_keywords": [
+        "LIBERO",
+        "CALVIN",
+        "SIMPLER",
+        "RoboCasa",
+        "RLBench",
+        "success rate",
+        "evaluation protocol",
+        "real-robot evaluation"
+      ],
+      "representative_works": [
+        "LIBERO",
+        "SIMPLER"
+      ],
+      "source_ids": [
+        "survey_real_world_2025",
+        "survey_ma_2026",
+        "repo_awesome_vla_robotics_2026"
+      ],
+      "estimated_card_minutes": 5
+    },
+    {
+      "id": "failure_modes_and_reliability",
+      "title_zh": "失败模式、可靠性与恢复",
+      "title_en": "Failure Modes, Reliability and Recovery",
+      "module_id": "generalization_evaluation",
+      "order": 3,
+      "priority": "P1",
+      "priority_reason": "可靠性决定真实部署，但安全/恢复方案仍未标准化；合并为一个 P1 节点避免把泛安全学科过度扩张进 VLA。",
+      "stability": "evolving",
+      "scope": "学习感知/语言 grounding、动作分布、covariate shift、OOD、延迟、长时程误差、数据偏差和硬件执行等失败来源，以及 failure detection、replan/recovery、安全约束的接口；不展开形式化安全验证。",
+      "prerequisites": [
+        "behavior_cloning_for_vla",
+        "generalization_taxonomy",
+        "benchmarks_and_evaluation_protocols"
+      ],
+      "related_concepts": [
+        "reasoning_for_action_and_spatial_grounding",
+        "real_time_inference_and_control_frequency",
+        "vla_post_training_with_rl"
+      ],
+      "learning_goals": [
+        "能将一次 VLA 失败归因到感知/指令/策略/动作接口/执行/分布外等层级，而不是笼统说“模型不够强”。",
+        "能区分 robustness、safety、failure detection 与 recovery，并判断论文证据覆盖了哪一层。"
+      ],
+      "recognition_keywords": [
+        "failure mode",
+        "robustness",
+        "reliability",
+        "OOD failure",
+        "failure detection",
+        "recovery",
+        "safety",
+        "replanning"
+      ],
+      "representative_works": [
+        "Gemini Robotics",
+        "Real-Time Chunking"
+      ],
+      "source_ids": [
+        "survey_real_world_2025",
+        "survey_ma_2026",
+        "paper_gemini_robotics_2025",
+        "repo_awesome_vla_official_2026"
+      ],
+      "estimated_card_minutes": 5
+    },
+    {
+      "id": "real_time_inference_and_control_frequency",
+      "title_zh": "实时推理、控制频率与延迟预算",
+      "title_en": "Real-Time Inference, Control Frequency and Latency",
+      "module_id": "deployment",
+      "order": 1,
+      "priority": "P1",
+      "priority_reason": "VLA 能否真实运行不仅取决于 success rate；实时性是工程实现高频出现的问题，但并非理解所有论文的最低门槛，故 P1。",
+      "stability": "evolving",
+      "scope": "学习端到端 latency、token/denoising/flow 推理成本、action chunk 生成周期、控制频率、传感/网络/执行延迟和 stale observation；不展开实时操作系统。",
+      "prerequisites": [
+        "action_space_and_control_parameterization",
+        "action_chunking_and_horizon"
+      ],
+      "related_concepts": [
+        "autoregressive_action_generation",
+        "diffusion_action_generation",
+        "flow_matching_action_generation",
+        "asynchronous_chunk_execution_and_replanning",
+        "efficiency_compression_and_on_device"
+      ],
+      "learning_goals": [
+        "能把模型推理 FPS 与实际 robot control Hz 区分开，并建立一帧闭环的 latency budget。",
+        "能解释 AR 序列长度、生成式采样步数和 chunk size 如何共同影响响应性。"
+      ],
+      "recognition_keywords": [
+        "latency",
+        "control frequency",
+        "control Hz",
+        "real-time inference",
+        "inference speed",
+        "stale observation",
+        "latency budget"
+      ],
+      "representative_works": [
+        "π₀",
+        "FAST",
+        "OpenVLA"
+      ],
+      "source_ids": [
+        "survey_real_world_2025",
+        "paper_pi0_2025",
+        "paper_fast_2025",
+        "paper_openvla_2024"
+      ],
+      "estimated_card_minutes": 5
+    },
+    {
+      "id": "asynchronous_chunk_execution_and_replanning",
+      "title_zh": "异步 Action Chunk 执行与重规划",
+      "title_en": "Asynchronous Action-Chunk Execution and Replanning",
+      "module_id": "deployment",
+      "order": 2,
+      "priority": "P1",
+      "priority_reason": "异步执行正在解决大模型策略的真实延迟问题，已值得 standard path 学习，但具体算法仍快速演进。",
+      "stability": "evolving",
+      "scope": "学习模型推理与机器人动作执行并行、chunk overlap、receding-horizon 重规划和 stale action 修正的基本设计；不把单一 Real-Time Chunking 算法细节冻结为标准。",
+      "prerequisites": [
+        "action_chunking_and_horizon",
+        "real_time_inference_and_control_frequency"
+      ],
+      "related_concepts": [
+        "failure_modes_and_reliability",
+        "diffusion_action_generation",
+        "flow_matching_action_generation"
+      ],
+      "learning_goals": [
+        "能解释同步“算完一整 chunk 再执行”为什么在高延迟 VLA 中造成停顿或陈旧动作。",
+        "能分析异步推理、chunk overlap 与频繁重规划的稳定性/计算权衡。"
+      ],
+      "recognition_keywords": [
+        "asynchronous inference",
+        "Real-Time Chunking",
+        "RTC",
+        "replanning",
+        "chunk overlap",
+        "receding-horizon execution"
+      ],
+      "representative_works": [
+        "Real-Time Chunking"
+      ],
+      "source_ids": [
+        "survey_real_world_2025",
+        "survey_action_tokenization_2025",
+        "repo_awesome_vla_robotics_2026"
+      ],
+      "estimated_card_minutes": 4
+    },
+    {
+      "id": "efficiency_compression_and_on_device",
+      "title_zh": "效率、压缩与端侧部署",
+      "title_en": "Efficiency, Compression and On-Device Deployment",
+      "module_id": "deployment",
+      "order": 3,
+      "priority": "P1",
+      "priority_reason": "真实项目常受算力与延迟约束；方法变化快但问题长期存在，因此为 P1/evolving。",
+      "stability": "evolving",
+      "scope": "学习量化、缓存、early exit、layer skipping、distillation/小模型、PEFT 与 on-device serving 对延迟、显存和性能的影响；不深入硬件编译器或芯片优化。",
+      "prerequisites": [
+        "vlm_backbone_and_robotic_grounding",
+        "real_time_inference_and_control_frequency"
+      ],
+      "related_concepts": [
+        "downstream_finetuning_and_peft",
+        "autoregressive_action_generation",
+        "dual_system_action_expert_architecture"
+      ],
+      "learning_goals": [
+        "能根据机器人计算预算识别主要瓶颈是 backbone、action decoder、序列长度还是传输。",
+        "能设计至少一种量化/缓存/裁剪或小模型方案，并说明需要重新验证的任务成功率与延迟指标。"
+      ],
+      "recognition_keywords": [
+        "quantization",
+        "on-device VLA",
+        "cache",
+        "early exit",
+        "layer skipping",
+        "model compression",
+        "serving"
+      ],
+      "representative_works": [
+        "OpenVLA",
+        "Gemini Robotics On-Device",
+        "CEED-VLA"
+      ],
+      "source_ids": [
+        "paper_openvla_2024",
+        "survey_real_world_2025",
+        "repo_awesome_vla_official_2026",
+        "repo_awesome_vla_robotics_2026"
+      ],
+      "estimated_card_minutes": 4
+    }
+  ],
+  "recommended_paths": {
+    "minimum_path": [
+      "vla_problem_formulation",
+      "behavior_cloning_for_vla",
+      "transformer_policy_sequence_modeling",
+      "vlm_backbone_and_robotic_grounding",
+      "language_conditioning_and_grounding",
+      "action_space_and_control_parameterization",
+      "action_discretization_and_tokenization",
+      "action_chunking_and_horizon",
+      "autoregressive_action_generation",
+      "diffusion_action_generation",
+      "robot_data_and_trajectory_schema",
+      "cross_embodiment_training_and_action_alignment",
+      "downstream_finetuning_and_peft",
+      "generalization_taxonomy",
+      "benchmarks_and_evaluation_protocols"
+    ],
+    "standard_path": [
+      "vla_problem_formulation",
+      "behavior_cloning_for_vla",
+      "transformer_policy_sequence_modeling",
+      "vlm_backbone_and_robotic_grounding",
+      "visual_representation_for_control",
+      "language_conditioning_and_grounding",
+      "robot_state_and_proprioception",
+      "multimodal_fusion_and_token_interface",
+      "temporal_context_and_observation_history",
+      "action_space_and_control_parameterization",
+      "action_discretization_and_tokenization",
+      "continuous_action_decoding",
+      "action_chunking_and_horizon",
+      "compressed_action_tokenization",
+      "autoregressive_action_generation",
+      "diffusion_action_generation",
+      "flow_matching_action_generation",
+      "monolithic_vla_architecture",
+      "dual_system_action_expert_architecture",
+      "hierarchical_planner_policy_architecture",
+      "intermediate_action_abstractions",
+      "reasoning_for_action_and_spatial_grounding",
+      "robot_data_and_trajectory_schema",
+      "data_collection_and_demonstration_quality",
+      "dataset_mixture_and_sampling",
+      "cross_embodiment_training_and_action_alignment",
+      "pretraining_cotuning_and_auxiliary_objectives",
+      "downstream_finetuning_and_peft",
+      "vla_post_training_with_rl",
+      "simulation_augmentation_and_sim2real",
+      "generalization_taxonomy",
+      "benchmarks_and_evaluation_protocols",
+      "failure_modes_and_reliability",
+      "real_time_inference_and_control_frequency",
+      "asynchronous_chunk_execution_and_replanning",
+      "efficiency_compression_and_on_device"
+    ],
+    "research_path": [
+      "vla_problem_formulation",
+      "behavior_cloning_for_vla",
+      "transformer_policy_sequence_modeling",
+      "vlm_backbone_and_robotic_grounding",
+      "visual_representation_for_control",
+      "language_conditioning_and_grounding",
+      "robot_state_and_proprioception",
+      "multimodal_fusion_and_token_interface",
+      "temporal_context_and_observation_history",
+      "extended_modalities_3d_tactile_audio",
+      "action_space_and_control_parameterization",
+      "action_discretization_and_tokenization",
+      "continuous_action_decoding",
+      "action_chunking_and_horizon",
+      "compressed_action_tokenization",
+      "autoregressive_action_generation",
+      "diffusion_action_generation",
+      "flow_matching_action_generation",
+      "monolithic_vla_architecture",
+      "dual_system_action_expert_architecture",
+      "hierarchical_planner_policy_architecture",
+      "intermediate_action_abstractions",
+      "reasoning_for_action_and_spatial_grounding",
+      "world_model_vla_interface",
+      "robot_data_and_trajectory_schema",
+      "data_collection_and_demonstration_quality",
+      "dataset_mixture_and_sampling",
+      "cross_embodiment_training_and_action_alignment",
+      "pretraining_cotuning_and_auxiliary_objectives",
+      "downstream_finetuning_and_peft",
+      "vla_post_training_with_rl",
+      "human_video_and_latent_action_learning",
+      "simulation_augmentation_and_sim2real",
+      "generalization_taxonomy",
+      "benchmarks_and_evaluation_protocols",
+      "failure_modes_and_reliability",
+      "real_time_inference_and_control_frequency",
+      "asynchronous_chunk_execution_and_replanning",
+      "efficiency_compression_and_on_device"
+    ]
+  }
+}
