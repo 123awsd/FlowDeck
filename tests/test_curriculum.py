@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from codex_control_tower.curriculum import CURRICULUM_ROOT, CurriculumLibrary, CurriculumStore, validate_bundle
+from codex_control_tower.lessons import LessonStore, validate_lesson
 
 
 class CurriculumTests(unittest.TestCase):
@@ -45,6 +46,38 @@ class CurriculumTests(unittest.TestCase):
             report = validate_bundle(root)
             self.assertFalse(report["ok"])
             self.assertTrue(any("存在环" in error for error in report["errors"]))
+
+    def test_reviewed_lesson_is_real_teaching_content(self):
+        bundle = CurriculumLibrary().get("vla")
+        with tempfile.TemporaryDirectory() as directory:
+            store = LessonStore(Path(directory) / "lessons.json")
+            flow = store.get(bundle, "flow_matching_action_generation")
+            lora = store.get(bundle, "downstream_finetuning_and_peft")
+            self.assertTrue(validate_lesson(flow))
+            self.assertIn("速度场", flow["one_liner"])
+            self.assertIn("LoRA", lora["one_liner"])
+            self.assertGreaterEqual(len(flow.get("comparisons", [])), 2)
+
+    def test_outline_only_progress_is_archived_and_reset(self):
+        bundle = CurriculumLibrary().get("vla")
+        with tempfile.TemporaryDirectory() as directory:
+            progress = Path(directory) / "progress.json"
+            key = "vla:v1"
+            progress.write_text(json.dumps({
+                "schema_version": 1,
+                "selected_domain": "vla",
+                "curricula": {key: {
+                    "approved_at": "2026-09-06T12:00:00",
+                    "path": "standard_path",
+                    "current": "behavior_cloning_for_vla",
+                    "concepts": {"vla_problem_formulation": {"state": "understood"}},
+                }},
+            }), encoding="utf-8")
+            store = CurriculumStore(progress)
+            record = store.record(bundle)
+            self.assertEqual(record["concepts"], {})
+            self.assertIn("vla_problem_formulation", record["legacy_outline_progress"]["concepts"])
+            self.assertTrue(record["approved_at"])
 
 
 if __name__ == "__main__":

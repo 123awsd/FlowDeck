@@ -12,6 +12,7 @@ from .paths import DATA_DIR, PROJECT_ROOT
 
 CURRICULUM_ROOT = PROJECT_ROOT / "learning" / "domains"
 PROGRESS_FILE = DATA_DIR / "curriculum_progress.json"
+LESSON_PROGRESS_VERSION = 1
 PATH_LABELS = {
     "minimum_path": "核心路线",
     "standard_path": "标准路线",
@@ -224,9 +225,23 @@ class CurriculumStore:
         return f"{bundle['id']}:{bundle['domain'].get('version', 'v1')}"
 
     def record(self, bundle):
-        return self.data.setdefault("curricula", {}).setdefault(
-            self._key(bundle), {"approved_at": None, "path": "standard_path", "current": None, "concepts": {}}
-        )
+        records = self.data.setdefault("curricula", {})
+        key = self._key(bundle)
+        if key not in records:
+            records[key] = {"approved_at": None, "path": "standard_path", "current": None, "concepts": {}, "lesson_progress_version": LESSON_PROGRESS_VERSION}
+        record = records[key]
+        if record.get("lesson_progress_version") != LESSON_PROGRESS_VERSION:
+            old_progress = record.get("concepts", {})
+            if old_progress:
+                record["legacy_outline_progress"] = {
+                    "migrated_at": datetime.now().isoformat(timespec="seconds"),
+                    "concepts": old_progress,
+                }
+            record["concepts"] = {}
+            record["current"] = None
+            record["lesson_progress_version"] = LESSON_PROGRESS_VERSION
+            self._save()
+        return record
 
     def approved(self, bundle):
         return bool(self.record(bundle).get("approved_at"))

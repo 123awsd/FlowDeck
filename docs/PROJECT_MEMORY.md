@@ -20,7 +20,7 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 | 今日待办 | 已实现 | 本地待办、优先级、当日完成进度、系统中文输入法 | `src/codex_control_tower/ui.py` |
 | 系统监控 | 已实现 | CPU、内存、Swap、GPU/显存、网络、磁盘和高占用进程 | `src/codex_control_tower/system_monitor.py`、`src/codex_control_tower/ui.py` |
 | 前沿追踪 | 已实现 | 具身智能宽召回、质量门槛、五通道推荐、视频、反馈和有界存储 | `src/codex_control_tower/learning_feed.py`、`config/learning_preferences.json`、`src/codex_control_tower/ui.py` |
-| 系统学习 | 基础版已实现 | 已导入 VLA reviewed draft，支持路线、框架审查门禁、进度、知识点状态和来源；微卡正文待框架冻结后生成 | `src/codex_control_tower/curriculum.py`、`learning/domains/vla/`、`docs/LEARNING_SYSTEM.md` |
+| 系统学习 | 已实现 | VLA reviewed draft、三条路线、审查门禁与实际微课正文；关键课内置，其余按需生成并缓存 | `src/codex_control_tower/curriculum.py`、`src/codex_control_tower/lessons.py`、`learning/domains/vla/` |
 
 ## 稳定产品决定
 
@@ -51,6 +51,10 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 - Curriculum 由可靠资料一次性编译、人工审查后冻结；日常使用不能自动重构框架。
 - Frontier Event 只能成为 Curriculum 补丁候选，不能直接修改已冻结版本。
 - 第一批系统学习路线是 VLA、VLN、WAM；公共知识节点跨路线复用。
+- 系统学习卡片必须是实际教学内容，不能直接展示课程元数据；固定结构为直觉、机制、VLA 例子、辨析、易混点、术语和自测。
+- 关键课读取 `learning/domains/<domain>/lessons_<version>.json`，其余课程后台生成到最多 300 条的本地缓存。
+- 课程翻页使用不扫描窗口的轻量刷新，并预取下一课，避免点击“下一课”时卡顿或滚动错位。
+- 旧版只阅读课程提纲产生的进度不算正式学习进度；迁移时保存在 `legacy_outline_progress`，真实微课进度从零重新计算。
 
 完整设计见 [领域学习系统](LEARNING_SYSTEM.md)。
 
