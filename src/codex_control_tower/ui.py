@@ -7,17 +7,17 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 from .curriculum import CurriculumLibrary, CurriculumStore, PATH_LABELS, STATE_LABELS
-from .lessons import LessonStore, generate_lesson
+from .lessons import LessonChatStore, LessonStore, ask_lesson_tutor, generate_lesson
 from .learning_feed import PREFERENCES_PATH, Store as LearningStore, build_feed as build_learning_feed_v2, context_profile
 from .paths import ASSETS_DIR, DATA_DIR, PROJECT_ROOT
 from .system_monitor import SystemMonitor
 try:
     from PySide6.QtCore import Qt, QTimer, QEvent, QPoint
-    from PySide6.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPen
+    from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPen, QShortcut
     from PySide6.QtWidgets import *
 except ImportError:
     from PyQt5.QtCore import Qt, QTimer, QEvent, QPoint
-    from PyQt5.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPen
+    from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPen
     from PyQt5.QtWidgets import *
 
 BASE=PROJECT_ROOT; DATA=DATA_DIR/"tasks.json"; TODOS_FILE=DATA_DIR/"daily_todos.json"; EVENTS=DATA_DIR/"events.jsonl"
@@ -309,6 +309,56 @@ class DraggableHeader(QFrame):
         if event.button()==Qt.LeftButton:self.window().toggle_maximize(); event.accept(); return
         super().mouseDoubleClickEvent(event)
 
+class LessonChatDialog(QDialog):
+    """A lightweight, concept-scoped tutor using the existing DeepSeek key."""
+    def __init__(self,parent,bundle,concept,lesson,store,executor):
+        super().__init__(parent); self.bundle=bundle; self.concept=concept; self.lesson=lesson; self.store=store; self.executor=executor; self.future=None; self._close_after_answer=False
+        self.setWindowTitle("AI 学习助手 · "+concept.get("title_zh","当前知识点")); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setMinimumSize(560,520); self.resize(640,680); self.setStyleSheet("QDialog{background:#f8fafc} QLabel{font-family:'Noto Sans CJK SC';color:#172033} QPushButton{font-family:'Noto Sans CJK SC';padding:7px 12px;background:white;border:1px solid #dbe3ed;border-radius:7px} QPushButton:hover{background:#eef2ff;border-color:#a5b4fc} QPlainTextEdit{font-family:'Noto Sans CJK SC';font-size:12px;color:#172033;background:white;border:1px solid #cbd5e1;border-radius:9px;padding:8px}")
+        root=QVBoxLayout(self); root.setContentsMargins(14,13,14,14); root.setSpacing(9)
+        head=QHBoxLayout(); titles=QVBoxLayout(); titles.setSpacing(1); title=QLabel("AI 学习助手"); title.setFont(QFont("Noto Sans CJK SC",16,QFont.Bold)); title.setStyleSheet("color:#312e81"); titles.addWidget(title); subtitle=QLabel("当前课程 · "+concept.get("title_zh","知识点")); subtitle.setStyleSheet("color:#64748b;font-size:10px"); titles.addWidget(subtitle); head.addLayout(titles); head.addStretch(); clear=QPushButton("清空对话"); clear.clicked.connect(self.clear_chat); head.addWidget(clear); root.addLayout(head)
+        privacy=QLabel("只会把当前知识点、当前微课和你在这里的提问发送给 DeepSeek；项目路径、账号和 Codex 对话不会发送。对话记录仅保存在本机。")
+        privacy.setWordWrap(True); privacy.setStyleSheet("color:#475569;background:#eef2ff;padding:7px 9px;border-radius:7px;font-size:9px"); root.addWidget(privacy)
+        self.scroll=QScrollArea(); self.scroll.setWidgetResizable(True); self.scroll.setFrameShape(QFrame.NoFrame); self.scroll.setStyleSheet("QScrollArea{background:#f8fafc;border:0} QScrollArea QWidget#qt_scrollarea_viewport{background:#f8fafc}"); self.chat_body=QWidget(); self.chat_body.setStyleSheet("background:#f8fafc"); self.chat_layout=QVBoxLayout(self.chat_body); self.chat_layout.setContentsMargins(2,4,2,4); self.chat_layout.setSpacing(8); self.scroll.setWidget(self.chat_body); root.addWidget(self.scroll,1)
+        suggestions=QHBoxLayout(); suggestions.setSpacing(5)
+        for text in ("换个直观例子","和相邻方法怎么区分？","论文里怎么识别它？"):
+            chip=QPushButton(text); chip.setStyleSheet("QPushButton{padding:5px 8px;background:#f1f5f9;color:#475569;border:0;border-radius:6px;font-size:9px} QPushButton:hover{background:#e0e7ff;color:#3730a3}"); chip.clicked.connect(lambda _,value=text:self.input.setPlainText(value)); suggestions.addWidget(chip)
+        suggestions.addStretch(); root.addLayout(suggestions)
+        composer=QHBoxLayout(); composer.setSpacing(8); self.input=QPlainTextEdit(); self.input.setPlaceholderText("哪里不懂就直接问，例如：这里的速度场是谁预测的？\n支持系统中文输入法；点击发送或按 Ctrl+Enter。") ; self.input.setFixedHeight(82); composer.addWidget(self.input,1); self.send=QPushButton("发送"); self.send.setFixedSize(76,82); self.send.setStyleSheet("QPushButton{background:#4f46e5;color:white;border:0;border-radius:9px;font-weight:700} QPushButton:hover{background:#4338ca} QPushButton:disabled{background:#c7d2fe}"); self.send.clicked.connect(self.send_question); composer.addWidget(self.send); root.addLayout(composer)
+        self.shortcut=QShortcut(QKeySequence("Ctrl+Return"),self); self.shortcut.activated.connect(self.send_question); self.render_messages(); self.input.setFocus()
+    def render_messages(self):
+        while self.chat_layout.count():
+            item=self.chat_layout.takeAt(0); widget=item.widget()
+            if widget:widget.deleteLater()
+        rows=self.store.messages(self.bundle,self.concept["id"])
+        if not rows:
+            welcome=QLabel("这不是搜索框，你可以沿着自己的疑问连续追问。\n\n比如：\n• 先用完全不带公式的方式解释\n• 再给我一个机械臂动作例子\n• 那它和 Diffusion Policy 到底差在哪")
+            welcome.setWordWrap(True); welcome.setAlignment(Qt.AlignCenter); welcome.setStyleSheet("color:#64748b;background:white;border:1px solid #e2e8f0;padding:20px;border-radius:10px"); self.chat_layout.addWidget(welcome)
+        for row in rows:
+            holder=QWidget(); line=QHBoxLayout(holder); line.setContentsMargins(0,0,0,0); role=row.get("role"); bubble=QFrame(); bubble.setMaximumWidth(490); bubble.setStyleSheet("QFrame{background:#4f46e5;border:0;border-radius:10px}" if role=="user" else "QFrame{background:white;border:1px solid #e2e8f0;border-radius:10px}"); inside=QVBoxLayout(bubble); inside.setContentsMargins(11,8,11,8); label=QLabel(row.get("content","").replace("**","")); label.setTextFormat(Qt.PlainText); label.setWordWrap(True); label.setTextInteractionFlags(Qt.TextSelectableByMouse); label.setStyleSheet("color:white;font-size:11px" if role=="user" else "color:#334155;font-size:11px"); inside.addWidget(label)
+            if role=="user":line.addStretch(); line.addWidget(bubble)
+            else:line.addWidget(bubble); line.addStretch()
+            self.chat_layout.addWidget(holder)
+        if self.future and not self.future.done():
+            waiting=QLabel("AI 正在组织回答…"); waiting.setStyleSheet("color:#4338ca;background:#eef2ff;padding:8px 10px;border-radius:8px;font-size:10px"); self.chat_layout.addWidget(waiting,0,Qt.AlignLeft)
+        self.chat_layout.addStretch(); QTimer.singleShot(0,lambda:self.scroll.verticalScrollBar().setValue(self.scroll.verticalScrollBar().maximum()))
+    def send_question(self):
+        question=self.input.toPlainText().strip()
+        if not question or (self.future and not self.future.done()):return
+        history=self.store.messages(self.bundle,self.concept["id"]); self.store.append(self.bundle,self.concept["id"],"user",question); self.input.clear(); self.send.setEnabled(False); self.future=self.executor.submit(ask_lesson_tutor,self.bundle,self.concept,self.lesson,history,question); self.render_messages(); QTimer.singleShot(100,self.poll_answer)
+    def poll_answer(self):
+        if not self.future:return
+        if not self.future.done():QTimer.singleShot(100,self.poll_answer); return
+        try:answer=self.future.result()
+        except Exception as exc:answer="这次没有回答成功："+str(exc)+"\n\n你可以稍后重新发送。"
+        self.store.append(self.bundle,self.concept["id"],"assistant",answer); self.future=None
+        if self._close_after_answer:self.accept(); return
+        self.send.setEnabled(True); self.render_messages(); self.input.setFocus()
+    def clear_chat(self):
+        if QMessageBox.question(self,"清空当前对话","只清空这个知识点的本地问答记录吗？",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)==QMessageBox.Yes:self.store.clear(self.bundle,self.concept["id"]); self.render_messages()
+    def closeEvent(self,event):
+        if self.future and not self.future.done():self._close_after_answer=True; self.hide(); event.ignore(); return
+        super().closeEvent(event)
+
 class App(QWidget):
     def __init__(self):
         super().__init__()
@@ -319,7 +369,7 @@ class App(QWidget):
         self.learning_context={"label":"具身智能前沿","terms":[],"topics":[]}; self.learning_mode="frontier"
         self.curriculum_library=CurriculumLibrary(); self.curriculum_store=CurriculumStore(); loaded=self.curriculum_library.domains(); preferred=self.curriculum_store.selected_domain()
         self.curriculum_domain_id=preferred if self.curriculum_library.get(preferred) else (loaded[0]["id"] if loaded else "")
-        self.lesson_store=LessonStore(); self.lesson_executor=ThreadPoolExecutor(max_workers=1); self.lesson_future=None; self.lesson_job=None; self.lesson_errors={}; self.curriculum_card_widget=None
+        self.lesson_store=LessonStore(); self.lesson_chat_store=LessonChatStore(); self.lesson_executor=ThreadPoolExecutor(max_workers=1); self.tutor_executor=ThreadPoolExecutor(max_workers=1); self.lesson_future=None; self.lesson_job=None; self.lesson_errors={}; self.curriculum_card_widget=None; self.tutor_dialogs=[]
         self.system_monitor=SystemMonitor(); self.system_executor=ThreadPoolExecutor(max_workers=1); self.system_future=None; self.system_metrics=self.system_monitor.empty(); self.system_history={"cpu":deque(maxlen=60),"memory":deque(maxlen=60),"gpu":deque(maxlen=60),"disk":deque(maxlen=60)}
         try:self.seen=json.loads(SEEN_FILE.read_text())
         except Exception:self.seen={}
@@ -591,11 +641,10 @@ class App(QWidget):
         progress_box=QFrame(); progress_box.setObjectName("curriculumProgress"); progress_box.setStyleSheet("QFrame#curriculumProgress{background:#eef2ff;border:1px solid #dbeafe;border-radius:9px} QLabel{background:transparent}"); progress_layout=QVBoxLayout(progress_box); progress_layout.setContentsMargins(11,8,11,9); progress_layout.setSpacing(5); progress_top=QHBoxLayout(); route_title=QLabel(f"{domain.get('name_zh','VLA')} · {PATH_LABELS.get(path_name,path_name)}"); route_title.setStyleSheet("color:#312e81;font-weight:700"); progress_top.addWidget(route_title); progress_top.addStretch(); progress_number=QLabel(f"已理解 {stats['mastered']}/{stats['total']} · {stats['percent']}%"); progress_number.setStyleSheet("color:#4338ca;font-size:10px;font-weight:700"); progress_top.addWidget(progress_number); progress_layout.addLayout(progress_top); progress_bar=QProgressBar(); progress_bar.setTextVisible(False); progress_bar.setRange(0,100); progress_bar.setValue(stats["percent"]); progress_bar.setStyleSheet("QProgressBar{height:7px;border:0;border-radius:3px;background:#dbeafe} QProgressBar::chunk{background:#6366f1;border-radius:3px}"); progress_layout.addWidget(progress_bar); v.addWidget(progress_box)
 
         if concept:
-            modules={item["id"]:item for item in bundle["modules"]}; module=modules.get(concept.get("module_id"),{}); position=path.index(current_id)+1 if current_id in path else 1; state=self.curriculum_store.state(bundle,current_id)
+            modules={item["id"]:item for item in bundle["modules"]}; module=modules.get(concept.get("module_id"),{}); position=path.index(current_id)+1 if current_id in path else 1; state=self.curriculum_store.state(bundle,current_id); lesson=self.lesson_store.get(bundle,current_id)
             card=QFrame(); self.curriculum_card_widget=card; card.setObjectName("conceptCard"); card.setStyleSheet("QFrame#conceptCard{background:white;border:1px solid #dbe3ed;border-left:4px solid #6366f1;border-radius:10px} QLabel{background:transparent;border:0}"); card_layout=QVBoxLayout(card); card_layout.setContentsMargins(14,11,14,12); card_layout.setSpacing(9)
-            badges=QHBoxLayout(); module_badge=QLabel(module.get("title_zh","VLA")); module_badge.setStyleSheet("color:#4338ca;background:#eef2ff;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(module_badge); priority=QLabel(concept.get("priority","P1")); priority.setStyleSheet("color:#b45309;background:#fef3c7;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(priority); stability_labels={"foundation":"稳定基础","evolving":"持续演进","frontier":"前沿扩展"}; stability=QLabel(stability_labels.get(concept.get("stability"),concept.get("stability",""))); stability.setStyleSheet("color:#0369a1;background:#e0f2fe;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(stability); state_badge=QLabel(STATE_LABELS.get(state,"未学习")); state_badge.setStyleSheet("color:#047857;background:#ecfdf5;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(state_badge); badges.addStretch(); number=QLabel(f"第 {position}/{len(path)} 项 · {concept.get('estimated_card_minutes',4)} 分钟"); number.setStyleSheet("color:#64748b;font-size:9px"); badges.addWidget(number); card_layout.addLayout(badges)
+            badges=QHBoxLayout(); module_badge=QLabel(module.get("title_zh","VLA")); module_badge.setStyleSheet("color:#4338ca;background:#eef2ff;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(module_badge); priority=QLabel(concept.get("priority","P1")); priority.setStyleSheet("color:#b45309;background:#fef3c7;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(priority); stability_labels={"foundation":"稳定基础","evolving":"持续演进","frontier":"前沿扩展"}; stability=QLabel(stability_labels.get(concept.get("stability"),concept.get("stability",""))); stability.setStyleSheet("color:#0369a1;background:#e0f2fe;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(stability); state_badge=QLabel(STATE_LABELS.get(state,"未学习")); state_badge.setStyleSheet("color:#047857;background:#ecfdf5;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700"); badges.addWidget(state_badge); badges.addStretch(); tutor_top=QPushButton("问 AI"); tutor_top.setEnabled(approved and bool(lesson)); tutor_top.setToolTip("围绕当前知识点连续追问" if lesson else "需要先生成教学正文"); tutor_top.setStyleSheet("padding:4px 9px;background:#eef2ff;color:#4338ca;border:0;font-size:9px;font-weight:700"); tutor_top.clicked.connect(self.open_curriculum_tutor); badges.addWidget(tutor_top); number=QLabel(f"第 {position}/{len(path)} 项 · {concept.get('estimated_card_minutes',4)} 分钟"); number.setStyleSheet("color:#64748b;font-size:9px"); badges.addWidget(number); card_layout.addLayout(badges)
             concept_title=QLabel(concept.get("title_zh","未命名知识点")); concept_title.setFont(QFont("Noto Sans CJK SC",17,QFont.Bold)); concept_title.setStyleSheet("color:#0f172a"); card_layout.addWidget(concept_title); english=QLabel(concept.get("title_en","")); english.setStyleSheet("color:#64748b;font-size:10px"); card_layout.addWidget(english)
-            lesson=self.lesson_store.get(bundle,current_id)
             if lesson:
                 self.render_curriculum_lesson(card_layout,lesson)
                 if approved and not self.lesson_future:QTimer.singleShot(700,lambda b=bundle,p=list(path),c=current_id:self.prefetch_next_lesson(b,p,c))
@@ -613,7 +662,7 @@ class App(QWidget):
             bottom=QHBoxLayout(); previous=QPushButton("← 上一个"); previous.setEnabled(position>1); previous.clicked.connect(lambda:self.navigate_curriculum(-1)); bottom.addWidget(previous); sources=QToolButton(); source_ids=concept.get("source_ids",[]); sources.setText(f"学习来源 {len(source_ids)}  ▾"); sources.setPopupMode(QToolButton.InstantPopup); sources.setStyleSheet("QToolButton{padding:7px 10px;background:white;color:#475569;border:1px solid #dbe3ed;border-radius:7px} QToolButton::menu-indicator{image:none}"); source_menu=QMenu(sources)
             for source_id in source_ids:
                 source=bundle["source_by_id"].get(source_id,{}); action=source_menu.addAction(f"{source.get('type','资料')} · {source.get('title',source_id)[:64]}"); action.triggered.connect(lambda _,url=source.get("url",""):self.open_external_url(url))
-            sources.setMenu(source_menu); bottom.addWidget(sources); bottom.addStretch(); unclear=QPushButton("没讲明白，换种讲法"); unclear.setEnabled(approved and bool(lesson)); unclear.setToolTip("重新生成这一课，并加入复习" if lesson else "需要先生成教学正文"); unclear.clicked.connect(self.regenerate_curriculum_lesson); bottom.addWidget(unclear); deep=QPushButton("基础懂了，待深入"); deep.setEnabled(approved and bool(lesson)); deep.setToolTip("基础内容已理解，同时加入深入队列" if lesson else "需要先生成教学正文"); deep.setStyleSheet("background:#eef2ff;color:#4338ca;border:0"); deep.clicked.connect(lambda:self.mark_curriculum_state("deep",True)); bottom.addWidget(deep); understood=QPushButton("学会了，下一课"); understood.setEnabled(approved and bool(lesson)); understood.setToolTip("记录进度并继续" if lesson else "需要先生成教学正文"); understood.setStyleSheet("background:#4f46e5;color:white;border:0;font-weight:700"); understood.clicked.connect(lambda:self.mark_curriculum_state("understood",True)); bottom.addWidget(understood); card_layout.addLayout(bottom); v.addWidget(card)
+            sources.setMenu(source_menu); bottom.addWidget(sources); bottom.addStretch(); deep=QPushButton("基础懂了，待深入"); deep.setEnabled(approved and bool(lesson)); deep.setToolTip("基础内容已理解，同时加入深入队列" if lesson else "需要先生成教学正文"); deep.setStyleSheet("background:#eef2ff;color:#4338ca;border:0"); deep.clicked.connect(lambda:self.mark_curriculum_state("deep",True)); bottom.addWidget(deep); understood=QPushButton("学会了，下一课"); understood.setEnabled(approved and bool(lesson)); understood.setToolTip("记录进度并继续" if lesson else "需要先生成教学正文"); understood.setStyleSheet("background:#4f46e5;color:white;border:0;font-weight:700"); understood.clicked.connect(lambda:self.mark_curriculum_state("understood",True)); bottom.addWidget(understood); card_layout.addLayout(bottom); v.addWidget(card)
 
         map_box=QFrame(); map_box.setObjectName("curriculumMap"); map_box.setStyleSheet("QFrame#curriculumMap{background:white;border:1px solid #e2e8f0;border-radius:9px} QLabel{background:transparent}"); map_layout=QVBoxLayout(map_box); map_layout.setContentsMargins(11,9,11,10); map_title=QLabel("路线概览"); map_title.setStyleSheet("color:#0f172a;font-weight:700"); map_layout.addWidget(map_title)
         for module in sorted(bundle["modules"],key=lambda item:item.get("order",0)):
@@ -674,10 +723,15 @@ class App(QWidget):
         if index<len(path):
             next_id=path[index]
             if not self.lesson_store.get(bundle,next_id):self.ensure_curriculum_lesson(next_id,True)
-    def regenerate_curriculum_lesson(self):
+    def open_curriculum_tutor(self):
         bundle,path,current=self.current_curriculum()
         if not bundle or not current:return
-        self.curriculum_store.set_state(bundle,current,"learning"); self.ensure_curriculum_lesson(current,False,True)
+        lesson=self.lesson_store.get(bundle,current)
+        if not lesson:return
+        dialog=LessonChatDialog(self,bundle,bundle["concept_by_id"][current],lesson,self.lesson_chat_store,self.tutor_executor); self.tutor_dialogs.append(dialog); dialog.finished.connect(lambda _,item=dialog:self.release_tutor_dialog(item)); dialog.show(); dialog.raise_(); dialog.activateWindow()
+    def release_tutor_dialog(self,dialog):
+        if dialog in self.tutor_dialogs:self.tutor_dialogs.remove(dialog)
+        dialog.deleteLater()
     def refresh_curriculum(self,scroll=False):
         self.refresh(scan_windows=False)
         if scroll:QTimer.singleShot(0,self.scroll_to_curriculum_card)

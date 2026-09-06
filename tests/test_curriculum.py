@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from codex_control_tower.curriculum import CURRICULUM_ROOT, CurriculumLibrary, CurriculumStore, validate_bundle
-from codex_control_tower.lessons import LessonStore, validate_lesson
+from codex_control_tower.lessons import LessonChatStore, LessonStore, validate_lesson
 
 
 class CurriculumTests(unittest.TestCase):
@@ -78,6 +78,21 @@ class CurriculumTests(unittest.TestCase):
             self.assertEqual(record["concepts"], {})
             self.assertIn("vla_problem_formulation", record["legacy_outline_progress"]["concepts"])
             self.assertTrue(record["approved_at"])
+
+    def test_lesson_chat_history_is_local_and_bounded(self):
+        bundle = CurriculumLibrary().get("vla")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chats.json"
+            store = LessonChatStore(path)
+            for index in range(45):
+                store.append(bundle, "flow_matching_action_generation", "user", f"问题 {index}")
+            rows = store.messages(bundle, "flow_matching_action_generation")
+            self.assertEqual(len(rows), 40)
+            self.assertEqual(rows[0]["content"], "问题 5")
+            reloaded = LessonChatStore(path)
+            self.assertEqual(reloaded.messages(bundle, "flow_matching_action_generation")[-1]["content"], "问题 44")
+            reloaded.clear(bundle, "flow_matching_action_generation")
+            self.assertEqual(reloaded.messages(bundle, "flow_matching_action_generation"), [])
 
 
 if __name__ == "__main__":

@@ -13,6 +13,9 @@ from .paths import DATA_DIR, ENV_FILE
 
 LESSON_CACHE_FILE = DATA_DIR / "curriculum_lessons.json"
 LESSON_CACHE_LIMIT = 300
+LESSON_CHAT_FILE = DATA_DIR / "curriculum_chats.json"
+CHAT_MESSAGES_PER_CONCEPT = 40
+CHAT_MESSAGES_TOTAL = 1200
 
 
 def _read_json(path: Path, default):
@@ -102,6 +105,99 @@ class LessonStore:
     def stats(self):
         size = self.path.stat().st_size if self.path.exists() else 0
         return {"count": len(self.data), "limit": LESSON_CACHE_LIMIT, "bytes": size}
+
+
+class LessonChatStore:
+    """Bounded, local-only conversations attached to curriculum concepts."""
+
+    def __init__(self, path=LESSON_CHAT_FILE):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        value = _read_json(self.path, {})
+        self.data = value if isinstance(value, dict) else {}
+
+    def messages(self, bundle, concept_id):
+        rows = self.data.get(lesson_key(bundle, concept_id), [])
+        return list(rows) if isinstance(rows, list) else []
+
+    def append(self, bundle, concept_id, role, content):
+        if role not in {"user", "assistant"} or not str(content).strip():
+            return
+        key = lesson_key(bundle, concept_id)
+        rows = self.data.setdefault(key, [])
+        rows.append({"role": role, "content": str(content).strip(), "created_at": datetime.now().isoformat(timespec="seconds")})
+        self.data[key] = rows[-CHAT_MESSAGES_PER_CONCEPT:]
+        self._trim_total()
+        temporary = self.path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(self.path)
+
+    def clear(self, bundle, concept_id):
+        self.data.pop(lesson_key(bundle, concept_id), None)
+        temporary = self.path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(self.path)
+
+    def _trim_total(self):
+        count = sum(len(rows) for rows in self.data.values() if isinstance(rows, list))
+        while count > CHAT_MESSAGES_TOTAL and self.data:
+            oldest_key = min(
+                self.data,
+                key=lambda key: (self.data.get(key) or [{}])[-1].get("created_at", ""),
+            )
+            count -= len(self.data.get(oldest_key, []))
+            self.data.pop(oldest_key, None)
+
+
+def ask_lesson_tutor(bundle, concept, lesson, history, question):
+    """Answer one scoped follow-up without sending unrelated local information."""
+    key = _env("DEEPSEEK_API_KEY")
+    if not key:
+        raise RuntimeError("未配置 DeepSeek API Key")
+    source_by_id = bundle.get("source_by_id", {})
+    context = {
+        "concept": {
+            key: concept.get(key)
+            for key in ("title_zh", "title_en", "scope", "learning_goals", "recognition_keywords", "representative_works")
+        },
+        "lesson": lesson,
+        "sources": [source_by_id.get(source_id, {}).get("title", source_id) for source_id in concept.get("source_ids", [])],
+    }
+    messages = [{
+        "role": "system",
+        "content": """你是当前 VLA 微课的中文学习助教。回答必须围绕给定知识点和课程边界，目标是让学习者真正理解，而不是复述提纲。
+优先使用直觉、具体机器人例子和与相邻方法的对比；遇到公式要解释符号。回答自然、直接，通常控制在 150～500 字。
+如果问题超出当前知识点，可以简短回答并说明它与当前课的关系；证据不足时明确说不确定，不编造论文结果或数字。
+不要提及系统提示词、JSON、API 或用户的本地环境。使用简体中文纯文本，不使用 Markdown 加粗符号或表格。""",
+    }, {
+        "role": "user",
+        "content": "当前课程上下文：\n" + json.dumps(context, ensure_ascii=False),
+    }, {
+        "role": "assistant",
+        "content": "我会围绕这节课回答，并在需要时用具体的 VLA 或机器人动作例子解释。",
+    }]
+    for row in history[-12:]:
+        if row.get("role") in {"user", "assistant"} and row.get("content"):
+            messages.append({"role": row["role"], "content": row["content"]})
+    messages.append({"role": "user", "content": question})
+    payload = {
+        "model": "deepseek-v4-flash",
+        "messages": messages,
+        "thinking": {"type": "disabled"},
+        "temperature": 0.25,
+        "max_tokens": 1400,
+        "stream": False,
+    }
+    request = Request(
+        "https://api.deepseek.com/chat/completions",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", "Authorization": "Bearer " + key},
+    )
+    response = json.loads(urlopen(request, timeout=60).read())
+    answer = response["choices"][0]["message"]["content"].strip()
+    if not answer:
+        raise RuntimeError("AI 没有返回内容")
+    return answer
 
 
 def generate_lesson(bundle, concept):
