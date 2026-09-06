@@ -14,6 +14,7 @@ from .paths import ASSETS_DIR, DATA_DIR, PROJECT_ROOT
 from .project_ideas import ProjectIdeaStore
 from .system_monitor import SystemMonitor
 from .vocabulary import VocabularyLibrary, VocabularyStore
+from .vscode_bridge import ensure_bridge_installed
 try:
     from PySide6.QtCore import Qt, QTimer, QEvent, QPoint
     from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPen, QPixmap, QShortcut
@@ -437,7 +438,7 @@ class App(QWidget):
     def __init__(self):
         super().__init__()
         self.tasks=self.load(); self.todos=self.load_todos(); self.idea_store=ProjectIdeaStore(); self.view_mode="monitor"; self.windows=[]; self.expanded=False
-        self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}
+        self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}; self.pending_bridge_recovery={}
         self.feed_error=""; self.feed_future=None; self.feed_executor=ThreadPoolExecutor(max_workers=1)
         self.feed_store=LearningStore(); self.feed_display_limit=6; self.feed_items=self.feed_store.recent(self.feed_display_limit); self.feed_stats=self.feed_store.stats()
         self.learning_context={"label":"具身智能前沿","terms":[],"topics":[]}; self.learning_mode="frontier"
@@ -461,7 +462,7 @@ class App(QWidget):
         controls=(("—","缩成悬浮球",self.collapse),("□","最大化 / 还原",self.toggle_maximize),("×","关闭",self.close))
         for text,tip,fn in controls:
             button=QPushButton(text); button.setFixedSize(32,30); button.setToolTip(tip); button.setStyleSheet("QPushButton{padding:0;background:transparent;border:0;border-radius:7px;font-size:16px;color:#475569} QPushButton:hover{background:#e2e8f0}" if text!="×" else "QPushButton{padding:0;background:transparent;border:0;border-radius:7px;font-size:18px;color:#475569} QPushButton:hover{background:#fee2e2;color:#dc2626}"); button.clicked.connect(fn); h.addWidget(button)
-        shell_layout.addWidget(self.header); self.area=QScrollArea(); self.area.setWidgetResizable(True); self.content=QWidget(); self.box=QVBoxLayout(self.content); self.box.setSpacing(7); self.area.setWidget(self.content); shell_layout.addWidget(self.area); self.floating_tutor_button=QPushButton("问 AI",self.area.viewport()); self.floating_tutor_button.setFixedSize(72,36); self.floating_tutor_button.setCursor(Qt.PointingHandCursor); self.floating_tutor_button.setToolTip("随时围绕当前课程提问"); self.floating_tutor_button.setStyleSheet("QPushButton{background:#4f46e5;color:white;border:1px solid #c7d2fe;border-radius:18px;font-weight:700} QPushButton:hover{background:#4338ca}"); tutor_shadow=QGraphicsDropShadowEffect(self.floating_tutor_button); tutor_shadow.setBlurRadius(16); tutor_shadow.setOffset(0,3); tutor_shadow.setColor(QColor(49,46,129,100)); self.floating_tutor_button.setGraphicsEffect(tutor_shadow); self.floating_tutor_button.clicked.connect(self.open_curriculum_tutor); self.floating_tutor_button.hide(); self.area.viewport().installEventFilter(self); self.root.addWidget(self.shell); self.setup_vocab_shortcuts(); self.refresh(); self.collapse()
+        shell_layout.addWidget(self.header); self.area=QScrollArea(); self.area.setWidgetResizable(True); self.content=QWidget(); self.box=QVBoxLayout(self.content); self.box.setSpacing(7); self.area.setWidget(self.content); shell_layout.addWidget(self.area); self.floating_tutor_button=QPushButton("问 AI",self.area.viewport()); self.floating_tutor_button.setFixedSize(72,36); self.floating_tutor_button.setCursor(Qt.PointingHandCursor); self.floating_tutor_button.setToolTip("随时围绕当前课程提问"); self.floating_tutor_button.setStyleSheet("QPushButton{background:#4f46e5;color:white;border:1px solid #c7d2fe;border-radius:18px;font-weight:700} QPushButton:hover{background:#4338ca}"); tutor_shadow=QGraphicsDropShadowEffect(self.floating_tutor_button); tutor_shadow.setBlurRadius(16); tutor_shadow.setOffset(0,3); tutor_shadow.setColor(QColor(49,46,129,100)); self.floating_tutor_button.setGraphicsEffect(tutor_shadow); self.floating_tutor_button.clicked.connect(self.open_curriculum_tutor); self.floating_tutor_button.hide(); self.area.viewport().installEventFilter(self); self.root.addWidget(self.shell); self.setup_vocab_shortcuts(); ensure_bridge_installed(); self.refresh(); self.collapse()
         self.timer=QTimer(self); self.timer.timeout.connect(self.periodic_refresh); self.timer.start(5000); self.system_timer=QTimer(self); self.system_timer.timeout.connect(self.schedule_system_sample); self.system_timer.start(2000)
     def load(self):
         try:return json.loads(DATA.read_text())
@@ -1133,14 +1134,38 @@ class App(QWidget):
     def switch_account(self,w,profile,focus_after=False):
         if not profile:return
         if not self.bridge_ready(w):
-            self.collapse(); subprocess.run(["wmctrl","-i","-a",w["id"]]); QTimer.singleShot(250,self.ensure_on_top)
-            QMessageBox.warning(self,"该窗口需要重载一次","这个 VS Code 窗口还没有加载本地桥接。\n\n请执行一次“开发人员: 重新加载窗口”，然后重新选择账号并点聚焦。")
+            self.recover_bridge_then_switch(w,profile,focus_after)
             return
         request_id=str(uuid.uuid4()); requests=BRIDGE_DIR/"requests"; requests.mkdir(parents=True,exist_ok=True)
         payload={"id":request_id,"targetPath":w["path"],"profileId":profile["id"],"profileName":profile.get("name","未命名")}
         (requests/f"{request_id}.json").write_text(json.dumps(payload,ensure_ascii=False),encoding="utf-8")
         self.pending_focus[request_id]=(w["id"],w["path"],profile.get("name","未命名"),0)
         self.pending_accounts.pop(w["path"],None); self.collapse(); subprocess.run(["wmctrl","-i","-a",w["id"]]); QTimer.singleShot(500,lambda rid=request_id:self.wait_switch_result(rid))
+    def recover_bridge_then_switch(self,w,profile,focus_after=False):
+        path=w.get("path","")
+        if not path:return
+        if path in self.pending_bridge_recovery:return
+        installed,error=ensure_bridge_installed(force=True)
+        if not installed:
+            QMessageBox.warning(self,"桥接修复失败",f"无法修复 VS Code 桥接：{error}")
+            return
+        self.pending_bridge_recovery[path]=(dict(w),profile,focus_after,0)
+        self.collapse()
+        QTimer.singleShot(600,lambda p=path:self.wait_bridge_recovery(p))
+    def wait_bridge_recovery(self,path):
+        pending=self.pending_bridge_recovery.get(path)
+        if not pending:return
+        w,profile,focus_after,attempt=pending
+        if self.bridge_ready(w):
+            self.pending_bridge_recovery.pop(path,None)
+            self.switch_account(w,profile,focus_after)
+            return
+        if attempt>=25:
+            self.pending_bridge_recovery.pop(path,None)
+            QMessageBox.warning(self,"桥接恢复超时","桥接已重新安装，但目标 VS Code 窗口未在预期时间内响应。请在窗口完全打开后再点一次“切换并聚焦”。")
+            return
+        self.pending_bridge_recovery[path]=(w,profile,focus_after,attempt+1)
+        QTimer.singleShot(500,lambda p=path:self.wait_bridge_recovery(p))
     def open_conversation(self,w,conversation):
         if not self.bridge_ready(w):
             QMessageBox.warning(self,"该窗口需要重载一次","这个 VS Code 窗口的本地桥接尚未就绪，请执行一次“开发人员: 重新加载窗口”后重试。"); return

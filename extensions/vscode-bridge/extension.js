@@ -106,6 +106,11 @@ async function processRequests() {
     try { request = JSON.parse(fs.readFileSync(requestFile, 'utf8')); } catch { continue; }
     if (!belongsHere(request.targetPath)) continue;
     try {
+      if (request.action === 'ping') {
+        fs.writeFileSync(path.join(resultsDir, filename), JSON.stringify({ ok: true, at: Date.now() }));
+        fs.unlinkSync(requestFile);
+        continue;
+      }
       if (request.action === 'reloadWindow') {
         fs.writeFileSync(path.join(resultsDir, filename), JSON.stringify({ ok: true, at: Date.now() }));
         fs.unlinkSync(requestFile);
