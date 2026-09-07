@@ -709,14 +709,14 @@ class App(QWidget):
         hint=QLabel("自动监控运行状态 · 当前聚焦的窗口会自动标记为已查看"); hint.setStyleSheet("color:#64748b;font-size:11px"); v.addWidget(hint)
         for w in self.windows:
             unread=w["completed"]>self.seen.get(w["path"],0); state="运行结束，尚未查看" if unread else w["status"]
-            card=QFrame(); card.setObjectName("windowCard"); card.setStyleSheet("QFrame#windowCard{background:white;border:1px solid #dbeafe;border-radius:8px}"); card_layout=QVBoxLayout(card); card_layout.setContentsMargins(12,9,10,9); card_layout.setSpacing(7); h=QHBoxLayout(); h.setSpacing(8)
+            card=QFrame(); card.setObjectName("windowCard"); card.setStyleSheet("QFrame#windowCard{background:white;border:1px solid #dbeafe;border-radius:8px}"); h=QHBoxLayout(card); h.setContentsMargins(12,10,10,10); h.setSpacing(6)
             dot=QLabel("●" if unread else ("●" if state=="正在运行" else "○")); dot.setStyleSheet(f"color:{'#ef4444' if unread else ('#2563eb' if state=='正在运行' else '#94a3b8')};font-size:18px"); h.addWidget(dot)
-            info=QVBoxLayout(); name=QLabel(w["folder"]); name.setFont(QFont("Noto Sans CJK SC",14,QFont.Bold)); info.addWidget(name)
+            info=QVBoxLayout(); name=QLabel(w["folder"]); name.setMinimumWidth(0); name.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred); name.setFont(QFont("Noto Sans CJK SC",14,QFont.Bold)); info.addWidget(name)
             meta=QHBoxLayout(); account=QLabel(w["account"]); account.setStyleSheet("color:#4338ca;background:#eef2ff;padding:3px 8px;border-radius:5px;font-size:12px"); meta.addWidget(account); status=QLabel("待查看" if unread else state); status.setStyleSheet(f"color:{'#b91c1c' if unread else '#475569'};background:{'#fee2e2' if unread else '#f1f5f9'};padding:3px 8px;border-radius:5px;font-weight:{'700' if unread else '500'};font-size:12px"); meta.addWidget(status); meta.addStretch(); info.addLayout(meta)
             open_ideas=self.idea_store.list(w["path"],include_done=False)
             if open_ideas:
-                preview=QLabel("✦  "+open_ideas[0].get("text","")[:72]); preview.setToolTip(open_ideas[0].get("text","")); preview.setStyleSheet("color:#7c3aed;font-size:10px"); info.addWidget(preview)
-            h.addLayout(info,1); card_layout.addLayout(h); actions=QHBoxLayout(); actions.setSpacing(6); actions.addStretch()
+                preview=QLabel("✦  "+open_ideas[0].get("text","")[:72]); preview.setMinimumWidth(0); preview.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred); preview.setToolTip(open_ideas[0].get("text","")); preview.setStyleSheet("color:#7c3aed;font-size:10px"); info.addWidget(preview)
+            h.addLayout(info,1)
             conversations,total_conversations=project_conversations(w["path"])
             chats=QToolButton(); chats.setText(f"对话 {total_conversations}  ▾"); chats.setPopupMode(QToolButton.InstantPopup); chats.setCursor(Qt.PointingHandCursor); chats.setToolTip("只显示属于这个项目的 Codex 对话"); chats.setStyleSheet("QToolButton{padding:7px 11px;background:#f5f3ff;color:#6d28d9;border:1px solid #c4b5fd;border-radius:7px;font-weight:700} QToolButton:hover{background:#ede9fe} QToolButton::menu-indicator{image:none}")
             chat_menu=QMenu(chats); caption=chat_menu.addAction(f"此项目最近对话 · 共 {total_conversations} 条"); caption.setEnabled(False)
@@ -727,7 +727,7 @@ class App(QWidget):
                 action=chat_menu.addAction(f"{conversation['title']}    {source} · {stamp}"); action.setToolTip(conversation["title"]); action.triggered.connect(lambda _,x=w,c=conversation:self.open_owned_conversation(x,c))
             if not conversations:empty=chat_menu.addAction("这个项目还没有本地对话"); empty.setEnabled(False)
             if total_conversations>len(conversations):more=chat_menu.addAction(f"另外 {total_conversations-len(conversations)} 条较早对话暂未展开"); more.setEnabled(False)
-            chats.setMenu(chat_menu); actions.addWidget(chats)
+            chats.setMenu(chat_menu); chats.setMaximumWidth(86); h.addWidget(chats)
             pending=self.pending_accounts.get(w["id"]); selected_name=pending.get("name") if pending else w["account"]
             selector=QToolButton(); selector.setText(f"{selected_name}  {'待切换' if pending else '▾'}"); selector.setPopupMode(QToolButton.InstantPopup); selector.setCursor(Qt.PointingHandCursor); selector.setStyleSheet("QToolButton{padding:7px 11px;background:#fff7ed;color:#c2410c;border:1px solid #fdba74;border-radius:7px;font-weight:700} QToolButton:hover{background:#ffedd5} QToolButton::menu-indicator{image:none}" if pending else "QToolButton{padding:7px 11px;background:#f8fafc;color:#334155;border:1px solid #dbe3ed;border-radius:7px} QToolButton:hover{background:#eef2ff;color:#4338ca;border-color:#a5b4fc} QToolButton::menu-indicator{image:none}")
             menu=QMenu(selector)
@@ -744,10 +744,10 @@ class App(QWidget):
                 api_action.setEnabled(api_profile.get("configured",False)); api_action.setToolTip("手动选择的独立 API 接口，不会自动接管 Plus")
                 api_action.triggered.connect(lambda _,x=w,p=api_profile:self.select_account(x,p))
             if not available and not any(p.get("configured") for p in api_profiles):disabled=menu.addAction("暂无可用账号"); disabled.setEnabled(False)
-            selector.setMenu(menu); selector.setToolTip("先选择账号，再点聚焦应用切换"); selector.setMaximumWidth(180); actions.addWidget(selector)
-            ideas=QPushButton(f"灵感 {len(open_ideas)}" if open_ideas else "记灵感"); ideas.setToolTip("记录和管理这个项目暂未实现的想法"); ideas.setStyleSheet("background:#f5f3ff;color:#6d28d9;border:1px solid #ddd6fe"); ideas.clicked.connect(lambda _,x=w:self.open_project_ideas(x)); actions.addWidget(ideas)
-            create=QPushButton("加待办"); create.setToolTip("把这个项目加入今日待办"); create.clicked.connect(lambda _,x=w:self.prefill_todo(x)); actions.addWidget(create)
-            focus=QPushButton("切换并聚焦" if pending else ("查看" if unread else "聚焦")); focus.setStyleSheet("background:#ea580c;color:white;border:0" if pending else ("background:#dc2626;color:white;border:0" if unread else "background:#2563eb;color:white;border:0")); focus.clicked.connect(lambda _,x=w:self.focus(x["id"])); actions.addWidget(focus); card_layout.addLayout(actions); v.addWidget(card)
+            selector.setMenu(menu); selector.setToolTip("先选择账号，再点聚焦应用切换"); selector.setMaximumWidth(135); h.addWidget(selector)
+            ideas=QPushButton(f"灵感 {len(open_ideas)}" if open_ideas else "记灵感"); ideas.setToolTip("记录和管理这个项目暂未实现的想法"); ideas.setStyleSheet("padding:7px 10px;background:#f5f3ff;color:#6d28d9;border:1px solid #ddd6fe"); ideas.clicked.connect(lambda _,x=w:self.open_project_ideas(x)); h.addWidget(ideas)
+            create=QPushButton("加待办"); create.setToolTip("把这个项目加入今日待办"); create.setStyleSheet("padding:7px 10px"); create.clicked.connect(lambda _,x=w:self.prefill_todo(x)); h.addWidget(create)
+            focus=QPushButton("切换并聚焦" if pending else ("查看" if unread else "聚焦")); focus.setStyleSheet(("padding:7px 10px;background:#ea580c;color:white;border:0" if pending else ("padding:7px 10px;background:#dc2626;color:white;border:0" if unread else "padding:7px 10px;background:#2563eb;color:white;border:0"))); focus.clicked.connect(lambda _,x=w:self.focus(x["id"])); h.addWidget(focus); v.addWidget(card)
         self.box.addWidget(p)
     def open_project_ideas(self,window):
         dialog=ProjectIdeasDialog(self.idea_store,window,self); dialog.exec() if hasattr(dialog,"exec") else dialog.exec_(); self.refresh()
