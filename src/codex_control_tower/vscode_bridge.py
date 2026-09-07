@@ -27,11 +27,16 @@ def installed_bridge_matches():
     if not version or not installed.is_dir():
         return False
     try:
-        return all(
-            (installed / name).read_bytes() == (BRIDGE_SOURCE / name).read_bytes()
-            for name in ("package.json", "extension.js")
+        source_package = json.loads((BRIDGE_SOURCE / "package.json").read_text(encoding="utf-8"))
+        installed_package = json.loads((installed / "package.json").read_text(encoding="utf-8"))
+        # VS Code adds installation metadata to package.json, so byte equality
+        # would reinstall the bridge at every app start and delay activation.
+        identity_matches = all(
+            installed_package.get(key) == source_package.get(key)
+            for key in ("name", "publisher", "version", "main")
         )
-    except OSError:
+        return identity_matches and (installed / "extension.js").read_bytes() == (BRIDGE_SOURCE / "extension.js").read_bytes()
+    except (OSError, json.JSONDecodeError):
         return False
 
 
