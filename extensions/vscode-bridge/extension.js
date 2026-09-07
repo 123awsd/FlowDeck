@@ -219,8 +219,7 @@ async function processRequests() {
           applyProviderEnvironment(provider, requestedHome);
           fs.writeFileSync(reopenMarker(), JSON.stringify({ profileName: request.profileName, at: Date.now() }));
           transitioning = true;
-          restartCodexChildren();
-          setTimeout(() => { transitioning = false; vscode.commands.executeCommand('chatgpt.openSidebar'); }, 1200);
+          setTimeout(() => { transitioning = false; vscode.commands.executeCommand('workbench.action.restartExtensionHost'); }, 300);
           return;
         }
         fs.writeFileSync(path.join(resultsDir, filename), JSON.stringify({ ok: true, profileName: request.profileName, provider, at: Date.now() }));
@@ -233,8 +232,7 @@ async function processRequests() {
         applyProviderEnvironment('subscription');
         fs.writeFileSync(reopenMarker(), JSON.stringify({ profileName: request.profileName, at: Date.now() }));
         transitioning = true;
-        restartCodexChildren();
-        setTimeout(() => { transitioning = false; vscode.commands.executeCommand('chatgpt.openSidebar'); }, 1200);
+        setTimeout(() => { transitioning = false; vscode.commands.executeCommand('workbench.action.restartExtensionHost'); }, 300);
         return;
       }
       await vscode.commands.executeCommand('codex-switch.profile.activate', request.profileId);

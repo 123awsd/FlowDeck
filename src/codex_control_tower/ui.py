@@ -1194,7 +1194,7 @@ class App(QWidget):
                 if ready.name.startswith("ready-active-"):
                     active=info.get("activeFile","")
                     if not active or not (active==w["path"] or active.startswith(w["path"].rstrip("/")+"/")):continue
-                if provider_switch and info.get("bridgeVersion")!="0.1.4":continue
+                if provider_switch and info.get("bridgeVersion")!="0.1.5":continue
                 return True
             except Exception:pass
         return False
