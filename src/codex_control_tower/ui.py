@@ -1,5 +1,5 @@
 """Qt UI: crisp Chinese text, VS Code discovery and task management."""
-import hashlib, json, random, shutil, sqlite3, subprocess, sys, tempfile, threading, uuid
+import hashlib, json, os, random, shutil, sqlite3, subprocess, sys, tempfile, threading, uuid
 import time
 import urllib.request
 from collections import deque
@@ -31,6 +31,7 @@ SEEN_FILE=DATA_DIR/"seen_sessions.json"
 BRIDGE_DIR=Path.home()/".codex-window-manager"
 API_CODEX_HOME=Path.home()/".codex-heju"
 API_PROVIDERS_FILE=PROJECT_ROOT/"config"/"api_providers.json"
+PROVIDER_VSCODE_DIR=BRIDGE_DIR/"vscode-providers"
 STATES=["Running","Needs input","Ready","Blocked","Done"]
 LABELS=dict(zip(STATES,["执行中","需要输入","已就绪","已阻塞","已完成"]))
 COLORS=dict(zip(STATES,["#2563eb","#d97706","#059669","#dc2626","#64748b"]))
@@ -40,6 +41,20 @@ _SESSION_STREAMS={}
 _CONVERSATION_TITLES={}
 _LAST_BRIDGE_CLEANUP=0
 _API_USAGE_CACHE={}
+
+def vscode_binary():
+    """Return the Electron binary, not the `code` CLI forwarding wrapper."""
+    wrapper=Path(shutil.which("code") or "/usr/bin/code")
+    try:resolved=wrapper.resolve()
+    except OSError:resolved=wrapper
+    direct=resolved.parent.parent/"code" if resolved.parent.name=="bin" else resolved
+    return str(direct if direct.is_file() else wrapper)
+
+def clean_vscode_environment(codex_home=None):
+    """Start a real VS Code process without inheriting the caller's IPC session."""
+    env={key:value for key,value in os.environ.items() if not key.startswith("VSCODE_") and not key.startswith("CODEX_") and key not in {"ELECTRON_RUN_AS_NODE","ELECTRON_NO_ATTACH_CONSOLE"}}
+    if codex_home:env["CODEX_HOME"]=str(codex_home)
+    return env
 
 def run_cancellable_audio(args,cancel,timeout=15):
     try:process=subprocess.Popen(args,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
@@ -349,11 +364,13 @@ def scan():
         wid,_,pid,klass,rest=p; b=rest.split(None,1); title=b[1] if len(b)==2 else rest
         if not (klass.lower().startswith("code.") or "visual studio code" in title.lower()):continue
         title=title.replace(" - Visual Studio Code","").strip(); name=title.split(" - ")[-1].strip()
-        path=find_path(name); state=extension_state(workspace_db(path)) if path and workspace_db(path) else {}
+        path=find_path(name); initial_bridge=bridge_window_info(path,name)
+        if not path and initial_bridge.get("paths"):path=initial_bridge["paths"][0]
+        state=extension_state(workspace_db(path)) if path and workspace_db(path) else {}
         workspace_id=state.get("codexSwitch.activeProfileId.default"); profile=by_id.get(workspace_id or global_id,{})
         if " [SSH:" in name:status,completed,session_account=remote_session_status(path)
         else:status,completed,session_account=session_status(path,ps,sessions) if path else ("状态未知",0,None)
-        bridge_info=bridge_window_info(path,name); provider=bridge_info.get("provider","subscription")
+        bridge_info=bridge_window_info(path,name) or initial_bridge; provider=bridge_info.get("provider","subscription")
         provider_profile=api_profile_for(provider)
         account=provider_profile.get("name",provider) if provider!="subscription" else (session_account or profile.get("name","未知账号"))
         scope="API 服务商" if provider!="subscription" else ("最近请求" if session_account else ("工作区" if workspace_id else "插件当前"))
@@ -489,7 +506,7 @@ class App(QWidget):
     def __init__(self):
         super().__init__()
         self.tasks=self.load(); self.todos=self.load_todos(); self.idea_store=ProjectIdeaStore(); self.view_mode="monitor"; self.windows=[]; self.expanded=False
-        self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}; self.pending_bridge_recovery={}
+        self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}; self.pending_bridge_recovery={}; self.pending_provider_relaunch={}
         self.feed_error=""; self.feed_future=None; self.feed_executor=ThreadPoolExecutor(max_workers=1)
         self.feed_store=LearningStore(); self.feed_display_limit=6; self.feed_items=self.feed_store.recent(self.feed_display_limit); self.feed_stats=self.feed_store.stats()
         self.learning_context={"label":"具身智能前沿","terms":[],"topics":[]}; self.learning_mode="frontier"
@@ -1194,12 +1211,18 @@ class App(QWidget):
                 if ready.name.startswith("ready-active-"):
                     active=info.get("activeFile","")
                     if not active or not (active==w["path"] or active.startswith(w["path"].rstrip("/")+"/")):continue
-                if provider_switch and info.get("bridgeVersion")!="0.1.5":continue
+                if provider_switch and info.get("bridgeVersion")!="0.1.7":continue
                 return True
             except Exception:pass
         return False
     def switch_account(self,w,profile,focus_after=False):
         if not profile:return
+        if profile.get("kind")=="api":
+            self.relaunch_api_window(w,profile)
+            return
+        if w.get("provider","subscription")!="subscription":
+            self.relaunch_subscription_window(w,profile)
+            return
         provider_switch=profile.get("kind")=="api" or w.get("provider","subscription")!="subscription"
         if not self.bridge_ready(w,provider_switch):
             self.recover_bridge_then_switch(w,profile,focus_after,provider_switch)
@@ -1210,6 +1233,63 @@ class App(QWidget):
         (requests/f"{request_id}.json").write_text(json.dumps(payload,ensure_ascii=False),encoding="utf-8")
         self.pending_focus[request_id]=(w["id"],w["path"],profile.get("name","未命名"),0)
         self.pending_accounts.pop(w["path"],None); self.collapse(); subprocess.run(["wmctrl","-i","-a",w["id"]]); QTimer.singleShot(500,lambda rid=request_id:self.wait_switch_result(rid))
+    def provider_route_file(self,path):
+        return BRIDGE_DIR/"providers"/(path.encode("utf-8").hex()+".json")
+    def launch_vscode(self,path,user_data_dir=None,codex_home=None):
+        args=[vscode_binary(),"--new-window","--skip-welcome","--skip-release-notes"]
+        if user_data_dir:
+            args.extend([f"--user-data-dir={user_data_dir}",f"--extensions-dir={Path.home()/'.vscode/extensions'}","--disable-workspace-trust"])
+        args.append(path)
+        subprocess.Popen(args,env=clean_vscode_environment(codex_home),stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+    def wait_window_closed(self,wid,callback,attempt=0):
+        try:ids={line.split()[0] for line in subprocess.run(["wmctrl","-l"],capture_output=True,text=True,timeout=2).stdout.splitlines()}
+        except Exception:ids=set()
+        if wid not in ids:
+            callback(); return
+        if attempt>=80:
+            QMessageBox.warning(self,"窗口尚未关闭","目标 VS Code 仍未关闭，可能有未保存文件或确认框。处理后请重新点击切换。")
+            return
+        QTimer.singleShot(250,lambda:self.wait_window_closed(wid,callback,attempt+1))
+    def wait_provider_window(self,path,provider,profile=None,attempt=0):
+        windows=scan(); match=next((item for item in windows if item.get("path")==path and item.get("provider")==provider),None)
+        if match:
+            self.windows=windows; self.pending_provider_relaunch.pop(path,None)
+            if profile and provider=="subscription":
+                self.switch_account(match,profile,True)
+            else:
+                subprocess.run(["wmctrl","-i","-a",match["id"]]); QTimer.singleShot(250,self.ensure_on_top)
+            return
+        if attempt>=100:
+            self.pending_provider_relaunch.pop(path,None)
+            QMessageBox.warning(self,"切换未完成","新的 VS Code 已启动，但尚未确认 Codex 的账号来源。请等待窗口加载完成后再试一次。")
+            return
+        QTimer.singleShot(300,lambda:self.wait_provider_window(path,provider,profile,attempt+1))
+    def relaunch_api_window(self,w,profile):
+        home=Path(profile.get("codexHome","")).expanduser(); path=w.get("path","")
+        if not path or not (home/"config.toml").is_file() or not (home/"auth.json").is_file():
+            QMessageBox.warning(self,"API 尚未配置",f"{profile.get('name','该 API')} 缺少本地配置或登录信息。")
+            return
+        route=self.provider_route_file(path); route.parent.mkdir(parents=True,exist_ok=True)
+        route.write_text(json.dumps({"provider":profile.get("provider"),"providerName":profile.get("name"),"codexHome":str(home),"at":int(time.time()*1000)},ensure_ascii=False),encoding="utf-8")
+        instance=PROVIDER_VSCODE_DIR/hashlib.sha256(profile.get("provider","").encode()).hexdigest()[:16]
+        instance.mkdir(parents=True,exist_ok=True)
+        self.pending_accounts.pop(path,None); self.collapse()
+        subprocess.run(["wmctrl","-i","-c",w["id"]])
+        def launch():
+            self.launch_vscode(path,str(instance),home)
+            self.pending_provider_relaunch[path]=profile.get("provider")
+            QTimer.singleShot(500,lambda:self.wait_provider_window(path,profile.get("provider")))
+        QTimer.singleShot(250,lambda:self.wait_window_closed(w["id"],launch))
+    def relaunch_subscription_window(self,w,profile):
+        path=w.get("path",""); route=self.provider_route_file(path)
+        try:route.unlink()
+        except OSError:pass
+        self.pending_accounts.pop(path,None); self.collapse(); subprocess.run(["wmctrl","-i","-c",w["id"]])
+        def launch():
+            self.launch_vscode(path)
+            self.pending_provider_relaunch[path]="subscription"
+            QTimer.singleShot(500,lambda:self.wait_provider_window(path,"subscription",profile))
+        QTimer.singleShot(250,lambda:self.wait_window_closed(w["id"],launch))
     def recover_bridge_then_switch(self,w,profile,focus_after=False,provider_switch=False):
         path=w.get("path","")
         if not path:return

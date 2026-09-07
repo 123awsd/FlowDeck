@@ -15,18 +15,6 @@ let remoteStatus = null;
 let remoteStatusAt = 0;
 let transitioning = false;
 
-function ensureCodexWrapper() {
-  const wrapper = path.join(bridgeDir, 'codex-provider-wrapper.py');
-  const source = `#!/usr/bin/env python3\nimport glob,json,os,sys\nfrom pathlib import Path\nroot=Path.home()/'.codex-window-manager'\nprovider='subscription'\nfor marker in root.glob('ready-*.json'):\n    try:\n        data=json.loads(marker.read_text())\n        if int(data.get('pid',-1))==os.getppid():\n            provider=data.get('provider','subscription')\n            if provider!='subscription':\n                home=Path(data.get('codexHome',''))\n                if home.is_dir(): os.environ['CODEX_HOME']=str(home)\n            break\n    except Exception: pass\nif provider=='subscription': os.environ.pop('CODEX_HOME',None)\ncandidates=glob.glob(str(Path.home()/'.vscode/extensions/openai.chatgpt-*/bin/*/codex'))\nif not candidates: candidates=glob.glob(str(Path.home()/'.vscode/extensions/*/bin/*/codex'))\nif candidates: os.execv(max(candidates,key=os.path.getmtime),[max(candidates,key=os.path.getmtime),*sys.argv[1:]])\nraise SystemExit('Codex executable not found')\n`;
-  try { fs.mkdirSync(bridgeDir, { recursive: true }); fs.writeFileSync(wrapper, source, { mode: 0o700 }); fs.chmodSync(wrapper, 0o700); } catch {}
-  return wrapper;
-}
-
-async function configureCodexWrapper() {
-  const wrapper = ensureCodexWrapper();
-  try { await vscode.workspace.getConfiguration('chatgpt').update('cliExecutable', wrapper, vscode.ConfigurationTarget.Global); } catch {}
-}
-
 function cleanupTransientFiles() {
   const now = Date.now();
   if (now - lastCleanup < 300000) return;
@@ -257,7 +245,6 @@ async function reopenCodex() {
 
 function activate(context) {
   applySavedProvider();
-  configureCodexWrapper().catch(() => {});
   fs.mkdirSync(requestsDir, { recursive: true });
   const timer = setInterval(() => processRequests().catch(() => {}), 1000);
   context.subscriptions.push({ dispose: () => clearInterval(timer) });

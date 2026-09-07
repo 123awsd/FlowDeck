@@ -14,13 +14,15 @@ Control Tower 同时支持两类 Codex 认证来源：
 ## 隔离方式
 
 - 现有 Plus/Codex Switch 继续使用 `~/.codex`，不修改其 `config.toml` 和 `auth.json`。
-- 备用 API 使用权限受限的独立目录 `~/.codex-heju`。
+- 每个备用 API 使用权限受限的独立 `CODEX_HOME`，例如 `~/.codex-heju` 或 `~/.codex-providers/<provider>`。
 - VS Code 桥接在 `~/.codex-window-manager/providers/` 中只保存“某工作区选择了哪类服务商”，不保存密钥。
-- 桥接在目标 VS Code 扩展宿主启动时应用独立 `CODEX_HOME`，所以一个窗口可以用备用 API，其他窗口仍保持各自的 Plus 账号。
+- VS Code 的同一个主进程会共享扩展启动环境，不能可靠地只改单个窗口的 `CODEX_HOME`。因此切到 API 时，Control Tower 会正常关闭目标窗口，再以独立 VS Code 用户数据目录和对应 `CODEX_HOME` 重开该项目。其他 Plus 窗口不受影响。
+- 启动时直接调用 VS Code Electron 主进程并清理继承的 VS Code IPC 环境，避免命令被已有 Plus 实例接管。桥接只有在读到的实际进程环境与路由一致时，才会向界面报告 API 服务商。
+- 切回 Plus 时会用默认 VS Code 用户目录重开项目，随后自动调用 Codex Switch 激活用户选中的订阅账号。
 
 ## 安全与兼容性
 
-- API Key 仅由 Codex 登录流程写入 `~/.codex-heju/auth.json`，不得进入仓库、日志、文档或界面。
+- API Key 仅保存在对应服务商的本地 `auth.json`，不得进入仓库、日志、文档或界面。
 - 目录权限为 `700`，配置与认证文件权限为 `600`。
 - 第三方服务商可以看到通过该窗口发出的提示、上下文和工具交互，因此只应用于允许发送给该服务商的项目。
 - 当前本机 Codex CLI 0.114.0 不接受 `model_reasoning_effort = "ultra"`，备用配置使用其支持的最高档 `xhigh`。
