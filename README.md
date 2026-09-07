@@ -81,6 +81,72 @@ Codex Switch 账号切换、重启扩展宿主，并重新打开 Codex 侧栏。
 
 账号菜单还提供手动的一个或多个“API 备用”选项，公共元数据在 [`config/api_providers.json`](config/api_providers.json)中维护。它们各自使用完全独立的 `CODEX_HOME`，只作为 Plus 额度不足时的按量计费备用通道；不会自动接管，也不会覆盖 Codex Switch 中现有的 Plus 登录。切换保留原 VS Code 窗口，并在真实 Codex 子进程目录验证成功后才显示完成。不同运行时的历史只读聚合展示，不共享可写数据库。具体约束见 [`docs/ACCOUNT_PROVIDERS.md`](docs/ACCOUNT_PROVIDERS.md)。
 
+### 新增备用 API
+
+每个 API 服务商必须使用独立的 `CODEX_HOME`。以下示例用 `new-api` 作为服务商 ID；实际添加时，需要把它替换为简短且唯一的英文 ID。
+
+1. 创建独立目录：
+
+```bash
+mkdir -p ~/.codex-providers/new-api
+chmod 700 ~/.codex-providers/new-api
+```
+
+2. 创建 `~/.codex-providers/new-api/config.toml`：
+
+```toml
+model = "gpt-6-astra"
+model_provider = "new-api"
+model_reasoning_effort = "xhigh"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+service_tier = "fast"
+
+[model_providers.new-api]
+name = "new-api"
+base_url = "https://example.com/v1"
+wire_api = "responses"
+requires_openai_auth = true
+```
+
+模型、推理档位和 `base_url` 应以服务商文档为准。当前窗口路由要求服务商兼容 Responses API。配置完成后收紧权限：
+
+```bash
+chmod 600 ~/.codex-providers/new-api/config.toml
+```
+
+3. 使用 Codex 登录命令将 API Key 一次性保存到本地。下面的写法不会把密钥明文写进 Shell 历史：
+
+```bash
+IFS= read -r -s new_api_secret
+printf '%s' "$new_api_secret" |
+  CODEX_HOME="$HOME/.codex-providers/new-api" codex login --with-api-key
+unset new_api_secret
+```
+
+粘贴密钥并按回车后，验证认证状态：
+
+```bash
+CODEX_HOME="$HOME/.codex-providers/new-api" codex login status
+```
+
+输出应包含 `Logged in using an API key`。密钥只保存在该目录的 `auth.json` 中，不要把密钥写入仓库、README、`config/api_providers.json` 或命令参数。
+
+4. 在 [`config/api_providers.json`](config/api_providers.json) 的 `providers` 数组中加入公共元数据：
+
+```json
+{
+  "id": "new-api",
+  "name": "New API",
+  "base_url": "https://example.com/v1",
+  "codex_home": "~/.codex-providers/new-api",
+  "auth": "api_key",
+  "configured": true
+}
+```
+
+其中 `id` 必须和 `config.toml` 中的 `model_provider` 一致。如果服务商提供经过确认的余额接口，可以额外添加类似 `"usage_path": "/usage"` 的字段。最后重启一次 Control Tower，新服务商就会出现在窗口账号菜单中。首次使用前建议先测试服务商端点与模型是否真实可用。
+
 ## 跳转窗口
 
 “窗口标题（可选）”填写 Linux 窗口标题中的文字，程序会先用 `wmctrl -a` 聚焦已有窗口；聚焦失败时再执行 `code --reuse-window <项目路径>`。
