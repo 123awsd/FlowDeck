@@ -1,6 +1,6 @@
 import unittest
 
-from codex_control_tower.network_diagnostics import _group_leaves, _selector_group
+from codex_control_tower.network_diagnostics import _group_leaves, _selector_group, display_node_name
 
 
 class NetworkDiagnosticsTests(unittest.TestCase):
@@ -23,6 +23,10 @@ class NetworkDiagnosticsTests(unittest.TestCase):
     def test_flattens_groups_and_excludes_dead_or_direct(self):
         self.assertEqual(_group_leaves(self.proxies, "🤖AI网站"), ["AI-A"])
         self.assertEqual(_group_leaves(self.proxies, "🚀节点选择"), ["通用-A", "通用-B"])
+
+    def test_node_display_removes_unsupported_symbol_prefix(self):
+        self.assertEqual(display_node_name("🇸🇬新加坡02 | 推荐"), "新加坡02 | 推荐")
+        self.assertEqual(display_node_name("🤖AI网站"), "AI网站")
 
 
 if __name__ == "__main__":

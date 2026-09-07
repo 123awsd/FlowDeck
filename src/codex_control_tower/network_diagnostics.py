@@ -23,6 +23,13 @@ SERVICES = {
 _RESULT_CACHE = {}
 
 
+def display_node_name(value):
+    """Remove flag/emoji prefixes that Qt commonly renders as tofu boxes."""
+    value = str(value or "").strip()
+    value = re.sub(r"^[^0-9A-Za-z\u3400-\u9fff]+", "", value).strip()
+    return value or "未知节点"
+
+
 class UnixHTTPConnection(http.client.HTTPConnection):
     def __init__(self, socket_path, timeout=2):
         super().__init__("localhost", timeout=timeout); self.socket_path = socket_path
@@ -117,7 +124,7 @@ def mihomo_snapshot():
             preferred = next((value for value in proxies.values() if value.get("type") == "Selector" and value.get("now") not in (None, "DIRECT", "REJECT")), None)
         if not preferred:
             preferred = proxies.get("GLOBAL")
-        result["node"] = (preferred or {}).get("now", ""); result["controller"] = True
+        result["node"] = display_node_name((preferred or {}).get("now", "")); result["controller"] = True
         configs = controller_json("/configs", .8); tun = configs.get("tun")
         result["tun"] = bool(tun.get("enable")) if isinstance(tun, dict) else None
     except Exception:
@@ -161,7 +168,7 @@ def _connection_routes():
             meta = row.get("metadata") or {}; host = str(meta.get("host") or meta.get("destinationIP") or "").lower(); process = str(meta.get("process") or meta.get("processPath") or "").lower()
             matched = any(host.endswith(suffix) for suffix in suffixes) if suffixes else any(token in process for token in ("ssh", "scp", "rsync"))
             if matched:
-                chains = row.get("chains") or []; candidates.append({"host": host, "rule": row.get("rule") or "未知规则", "chain": " → ".join(reversed(chains)) if chains else "DIRECT", "process": process})
+                chains = row.get("chains") or []; candidates.append({"host": host, "rule": display_node_name(row.get("rule") or "未知规则"), "chain": " → ".join(display_node_name(item) for item in reversed(chains)) if chains else "DIRECT", "process": process})
         if candidates:
             result[name] = candidates[-1]
     return result
@@ -255,4 +262,4 @@ def switch_fastest(service):
     path = "/proxies/" + urllib.parse.quote(choice["group"], safe="")
     controller_request(path, method="PUT", payload={"name": choice["node"]}, timeout=3)
     _RESULT_CACHE.clear()
-    return {"service": service, **choice}
+    return {"service": service, **choice, "display_node": display_node_name(choice["node"])}
