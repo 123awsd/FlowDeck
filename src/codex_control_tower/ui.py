@@ -134,7 +134,7 @@ def api_provider_profiles():
     for row in rows:
         if not row.get("id") or not row.get("name"):continue
         home=str(row.get("codex_home","")).replace("~",str(Path.home()),1)
-        configured=bool(row.get("configured")) and (Path(home)/"config.toml").is_file() and (Path(home)/"auth.json").is_file()
+        configured=bool(row.get("configured")) and assert_independent_provider_home(home)[0]
         out.append({"id":"provider:"+row["id"],"name":row["name"],"kind":"api","provider":row["id"],"codexHome":home,"configured":configured,"baseUrl":row.get("base_url",""),"usagePath":row.get("usage_path","")})
     return out
 

@@ -179,10 +179,16 @@ def ensure_provider_routing_patch() -> tuple[bool, str]:
 
 
 def assert_independent_provider_home(home: str | Path) -> tuple[bool, str]:
-    """Reject provider homes that link any writable runtime state elsewhere."""
+    """Reject incomplete credentials or provider homes sharing writable state."""
     root = Path(home).expanduser()
     if not (root / "config.toml").is_file() or not (root / "auth.json").is_file():
         return False, "缺少 config.toml 或 auth.json"
+    try:
+        auth = json.loads((root / "auth.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False, "auth.json 无法读取"
+    if auth.get("auth_mode") != "apikey" or not str(auth.get("OPENAI_API_KEY", "")).strip():
+        return False, "尚未在这个 API 目录中保存有效的 API Key"
     unsafe = []
     for child in root.iterdir():
         if child.is_symlink():
