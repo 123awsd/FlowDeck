@@ -1219,6 +1219,11 @@ class App(QWidget):
             QMessageBox.warning(self,"桥接修复失败",f"无法修复 VS Code 桥接：{error}")
             return
         self.pending_bridge_recovery[path]=(dict(w),profile,focus_after,provider_switch,0)
+        # VS Code does not always hot-load a newly installed extension. Ask only
+        # the selected window to reload so the new bridge version can activate.
+        request_id=str(uuid.uuid4()); requests=BRIDGE_DIR/"requests"; requests.mkdir(parents=True,exist_ok=True)
+        payload={"id":request_id,"action":"reloadWindow","targetPath":path}
+        (requests/f"{request_id}.json").write_text(json.dumps(payload,ensure_ascii=False),encoding="utf-8")
         self.collapse()
         QTimer.singleShot(600,lambda p=path:self.wait_bridge_recovery(p))
     def wait_bridge_recovery(self,path):
