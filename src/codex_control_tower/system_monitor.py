@@ -4,13 +4,13 @@ The collector deliberately keeps no history on disk.  It reads procfs/sysfs
 and asks nvidia-smi for GPU data when available; callers decide how many
 recent samples to retain in memory.
 """
-import json
 import os
 import shutil
 import subprocess
 import time
-import urllib.request
 from pathlib import Path
+
+from .network_diagnostics import mihomo_snapshot
 
 
 def _number(value, default=0.0):
@@ -117,28 +117,7 @@ def _proxy_snapshot():
     now = time.monotonic()
     if now - _PROXY_CACHE[0] < 5:
         return dict(_PROXY_CACHE[1])
-    running = False
-    for directory in Path("/proc").glob("[0-9]*"):
-        try:
-            command = (directory / "cmdline").read_bytes().decode(errors="ignore").lower()
-            if "mihomo" in command or "clash" in command:
-                running = True; break
-        except OSError:
-            pass
-    node = ""
-    tun = None
-    if running:
-        for port in (9090, 9097):
-            try:
-                request = urllib.request.Request(f"http://127.0.0.1:{port}/proxies/GLOBAL")
-                with urllib.request.urlopen(request, timeout=.25) as response:
-                    node = json.loads(response.read()).get("now", "")
-                request = urllib.request.Request(f"http://127.0.0.1:{port}/configs")
-                with urllib.request.urlopen(request, timeout=.25) as response:
-                    tun = bool((json.loads(response.read()).get("tun") or {}).get("enable"))
-                break
-            except Exception:
-                continue
+    mihomo = mihomo_snapshot()
     try:
         mode = subprocess.run(
             ["gsettings", "get", "org.gnome.system.proxy", "mode"], capture_output=True,
@@ -148,7 +127,7 @@ def _proxy_snapshot():
         mode = "未知"
     terminal = bool(os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("ALL_PROXY") or
                     os.environ.get("http_proxy") or os.environ.get("https_proxy") or os.environ.get("all_proxy"))
-    result = {"running": running, "node": node, "tun": tun, "system_proxy": mode, "terminal_proxy": terminal}
+    result = {**mihomo, "system_proxy": mode, "terminal_proxy": terminal}
     _PROXY_CACHE = (now, result)
     return dict(result)
 

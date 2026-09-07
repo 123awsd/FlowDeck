@@ -13,12 +13,13 @@
 
 上下文占用使用最近请求输入 Token 除以模型上报的上下文窗口，是近似值；压缩发生后不应理解为项目级上下文占用。
 
-## 计划（第三、四阶段）
+## 已实现（第三、四阶段）
 
-- 手动检测 Codex、GitHub、Hugging Face 可达性与延迟。
-- 结合 Mihomo Connections 显示实时规则和代理链。
-- 一键诊断终端代理、Codex 代理、下载和 SSH 线路问题。
-- 手动节点真实测速及按用途推荐；禁止后台持续测速。
+- 手动检测 Codex、GitHub、Hugging Face 可达性、HTTP 状态和延迟。
+- 结合 Mihomo Connections 显示 Codex、GitHub、Hugging Face、SSH 的实时规则和代理链；没有活动连接时明确显示为空。
+- 支持 Mihomo TCP Controller 和 Clash Verge/Mihomo Party 使用的 Unix Socket Controller，控制密钥只在内存中读取和使用。
+- 手动测试当前线路的 3 MB 下载、128 KB 上传、TTFB、稳定性和失败率，结果在内存中缓存 10 分钟。
+- 手动选择最多 4 个存活候选节点，使用 Mihomo 的逐节点服务延迟测试分别推荐 Codex、GitHub 和 Hugging Face 节点；结果缓存 10 分钟，不自动切换节点。
 
 ## 产品约束
 
@@ -26,3 +27,4 @@
 - 不为监控信息增加横向滚动。
 - 不上传项目路径、对话内容、代理配置或连接记录。
 - 高频网络样本只保存在内存；未来持久化测速记录时必须设置数量和期限上限。
+- 网络诊断、真实测速和节点推荐只能手动触发；结果仅保存在当前窗口内，关闭后丢弃。

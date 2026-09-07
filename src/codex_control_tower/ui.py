@@ -11,6 +11,7 @@ from .curriculum import CurriculumLibrary, CurriculumStore, PATH_LABELS, STATE_L
 from .conversation_metrics import compact_tokens, elapsed_label, session_metrics
 from .lessons import LessonChatStore, LessonStore, ask_lesson_tutor, generate_lesson
 from .learning_feed import PREFERENCES_PATH, Store as LearningStore, build_feed as build_learning_feed_v2, context_profile
+from .network_diagnostics import benchmark_current_route, diagnose_network, recommend_nodes
 from .paths import ASSETS_DIR, DATA_DIR, PROJECT_ROOT
 from .project_ideas import ProjectIdeaStore
 from .provider_routing import assert_independent_provider_home, ensure_provider_routing_patch
@@ -543,12 +544,45 @@ class ConversationDetailsDialog(QDialog):
 
 class NetworkDetailsDialog(QDialog):
     def __init__(self,network,parent=None):
-        super().__init__(parent); self.setWindowTitle("网络详情"); self.setMinimumSize(440,330); self.resize(480,380); self.setWindowFlag(Qt.WindowStaysOnTopHint,True)
-        self.setStyleSheet("QDialog{background:#f8fafc} QLabel{font-family:'Noto Sans CJK SC'} QFrame{background:white;border:1px solid #e2e8f0;border-radius:9px}"); outer=QVBoxLayout(self); title=QLabel("网络详情"); title.setFont(QFont("Noto Sans CJK SC",17,QFont.Bold)); outer.addWidget(title)
+        super().__init__(parent); self.setWindowTitle("网络详情与诊断"); self.setMinimumSize(520,500); self.resize(580,620); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.executor=ThreadPoolExecutor(max_workers=1); self.future=None; self.job=""
+        self.setStyleSheet("QDialog{background:#f8fafc} QLabel{font-family:'Noto Sans CJK SC'} QFrame{background:white;border:1px solid #e2e8f0;border-radius:9px} QPlainTextEdit{background:white;border:1px solid #e2e8f0;border-radius:9px;padding:8px;color:#334155;font-family:'Noto Sans Mono CJK SC';font-size:10px}"); outer=QVBoxLayout(self); title=QLabel("网络详情与诊断"); title.setFont(QFont("Noto Sans CJK SC",17,QFont.Bold)); outer.addWidget(title)
         proxy=network.get("proxy",{}); card=QFrame(); grid=QGridLayout(card); grid.setContentsMargins(13,11,13,12); rows=(("实时下载",format_rate(network.get("download",0))),("实时上传",format_rate(network.get("upload",0))),("当前网卡",network.get("interface","未知网卡")),("Mihomo / Clash","运行中" if proxy.get("running") else "未运行"),("当前节点",proxy.get("node") or "控制接口不可读"),("TUN","已开启" if proxy.get("tun") is True else ("未开启" if proxy.get("tun") is False else "状态未知")),("系统代理",str(proxy.get("system_proxy") or "未知")),("终端代理","已设置" if proxy.get("terminal_proxy") else "未设置"))
         for index,(label,value) in enumerate(rows):
             caption=QLabel(label); caption.setStyleSheet("color:#64748b;font-size:10px"); number=QLabel(value); number.setStyleSheet("color:#0f172a;font-weight:700"); grid.addWidget(caption,index,0); grid.addWidget(number,index,1)
-        outer.addWidget(card); hint=QLabel("这里只做本机只读检测；服务可达性、线路追踪和真实测速将在下一阶段加入。") ; hint.setWordWrap(True); hint.setStyleSheet("color:#64748b;font-size:10px"); outer.addWidget(hint); outer.addStretch(); close=QPushButton("关闭"); close.clicked.connect(self.accept); outer.addWidget(close,0,Qt.AlignRight)
+        outer.addWidget(card); buttons=QHBoxLayout(); self.diagnose=QPushButton("网络诊断"); self.speed=QPushButton("当前线路测速"); self.recommend=QPushButton("推荐节点"); self.diagnose.clicked.connect(lambda:self.start_job("diagnose",diagnose_network)); self.speed.clicked.connect(lambda:self.start_job("speed",benchmark_current_route)); self.recommend.clicked.connect(lambda:self.start_job("recommend",recommend_nodes)); buttons.addWidget(self.diagnose); buttons.addWidget(self.speed); buttons.addWidget(self.recommend); outer.addLayout(buttons)
+        self.output=QPlainTextEdit(); self.output.setReadOnly(True); self.output.setPlainText("按需执行诊断或测速，不会在后台持续消耗网络。\n当前线路测速约下载 3 MB、上传 128 KB。\n推荐节点最多测试 4 个候选节点。") ; outer.addWidget(self.output,1); close=QPushButton("关闭"); close.clicked.connect(self.accept); outer.addWidget(close,0,Qt.AlignRight)
+    def start_job(self,name,fn):
+        if self.future and not self.future.done():return
+        self.job=name; self.output.setPlainText("正在检测，请稍候……"); self.set_busy(True); self.future=self.executor.submit(fn); QTimer.singleShot(120,self.poll_job)
+    def set_busy(self,value):
+        for button in (self.diagnose,self.speed,self.recommend):button.setDisabled(value)
+    def poll_job(self):
+        if not self.future:return
+        if not self.future.done():QTimer.singleShot(120,self.poll_job); return
+        try:data=self.future.result(); text=self.format_result(self.job,data)
+        except Exception as error:text="检测失败："+str(error)
+        self.future=None; self.set_busy(False); self.output.setPlainText(text)
+    def format_result(self,job,data):
+        if job=="diagnose":
+            lines=[]; mihomo=data.get("mihomo",{}); lines.append(("✓" if mihomo.get("running") else "⚠")+" Mihomo "+("运行正常" if mihomo.get("controller") else ("正在运行，但控制接口不可读" if mihomo.get("running") else "未运行")))
+            lines.append(("✓" if data.get("terminal_proxy") else "○")+" 终端代理"+("已设置" if data.get("terminal_proxy") else "未设置；终端程序可能走 DIRECT"))
+            for service,value in data.get("services",{}).items():lines.append(("✓" if value.get("ok") else "✗")+f" {service}："+(f"可访问 · {value.get('latency')} ms · HTTP {value.get('status')}" if value.get("ok") else "访问失败"))
+            lines.append("\n当前活动线路：")
+            for service in ("Codex","GitHub","Hugging Face","SSH"):
+                route=data.get("routes",{}).get(service); lines.append(f"• {service}："+(f"{route.get('chain')} · {route.get('rule')}" if route else "当前没有活动连接"))
+            return "\n".join(lines)
+        if job=="speed":
+            value=lambda number:format_rate(number) if number is not None else "失败"
+            ttfb=f"{data.get('ttfb'):.0f} ms" if data.get("ttfb") is not None else "失败"
+            cached="（10 分钟内的缓存结果）" if data.get("cached") else ""
+            return "当前线路："+(data.get("node") or ("本地代理" if data.get("proxied") else "DIRECT"))+cached+f"\n\n下载：{value(data.get('download'))}\n上传：{value(data.get('upload'))}\nTTFB：{ttfb}"+(f"\n稳定性：{data.get('stability'):.0f}%" if data.get("stability") is not None else "\n稳定性：样本不足")+f"\n失败率：{data.get('failure_percent')}%"
+        lines=["按服务推荐（最多测试 4 个候选节点）"+(" · 10 分钟内的缓存结果" if data.get("_cached") else "")+"："]
+        for service in ("Codex","GitHub","Hugging Face"):
+            row=data.get(service); lines.append(f"• {service}："+(f"{row.get('node')} · {row.get('delay')} ms" if row else "没有可用测试结果"))
+        lines.append("\n大文件下载与上传优先参考“当前线路测速”；这里的推荐依据是服务专用延迟。")
+        return "\n".join(lines)
+    def closeEvent(self,event):
+        self.executor.shutdown(wait=False,cancel_futures=True); event.accept()
 
 
 class App(QWidget):
@@ -751,7 +785,7 @@ class App(QWidget):
             conversations,total_conversations=project_conversations(w["path"])
             current_metrics=session_metrics(conversations[0]["file"]) if conversations else {}; current_total=current_metrics.get("total",{}); current_last=current_metrics.get("last",{}); context_percent=current_metrics.get("context_percent")
             if conversations:
-                running=state=="正在运行"; time_start=current_metrics.get("turn_started_at") if running and current_metrics.get("turn_running") else current_metrics.get("started_at"); active_line=QLabel(f"上下文 {'约 '+str(context_percent)+'%' if context_percent is not None else '--'}  ·  运行 {elapsed_label(time_start,current_metrics.get('updated_at'),running)}  ·  本轮 {compact_tokens(current_last.get('total_tokens'))}  ·  当前：{conversations[0]['title']}"); active_line.setMinimumWidth(0); active_line.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred); active_line.setToolTip(active_line.text()); active_line.setStyleSheet("color:#64748b;font-size:9px"); info.addWidget(active_line)
+                running=state=="正在运行"; time_start=current_metrics.get("turn_started_at") if running and current_metrics.get("turn_running") else current_metrics.get("started_at"); last_input=int(current_last.get("input_tokens") or 0); last_cached=int(current_last.get("cached_input_tokens") or 0); cache_hit=round(last_cached/last_input*100) if last_input else None; active_line=QLabel(f"上下文 {'约 '+str(context_percent)+'%' if context_percent is not None else '--'}  ·  缓存命中 {str(cache_hit)+'%' if cache_hit is not None else '--'}  ·  输入 {compact_tokens(last_input)}  ·  输出 {compact_tokens(current_last.get('output_tokens'))}  ·  运行 {elapsed_label(time_start,current_metrics.get('updated_at'),running)}"); active_line.setMinimumWidth(0); active_line.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred); active_line.setToolTip(active_line.text()); active_line.setStyleSheet("color:#64748b;font-size:9px"); info.addWidget(active_line)
             chats=QToolButton(); chats.setText(f"详情 {total_conversations}  ▾"); chats.setPopupMode(QToolButton.InstantPopup); chats.setCursor(Qt.PointingHandCursor); chats.setToolTip("查看当前对话数据和这个项目的其他对话"); chats.setStyleSheet("QToolButton{padding:7px 11px;background:#f5f3ff;color:#6d28d9;border:1px solid #c4b5fd;border-radius:7px;font-weight:700} QToolButton:hover{background:#ede9fe} QToolButton::menu-indicator{image:none}")
             chat_menu=QMenu(chats); detail_action=chat_menu.addAction("查看对话数据"); detail_action.triggered.connect(lambda _,x=w,rows=list(conversations):self.open_conversation_details(x,rows)); caption=chat_menu.addAction(f"此项目最近对话 · 共 {total_conversations} 条"); caption.setEnabled(False)
             if conversations:chat_menu.addSeparator()
