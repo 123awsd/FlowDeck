@@ -39,6 +39,7 @@ _SESSION_HEADERS={}
 _SESSION_STREAMS={}
 _CONVERSATION_TITLES={}
 _LAST_BRIDGE_CLEANUP=0
+_API_USAGE_CACHE={}
 
 def run_cancellable_audio(args,cancel,timeout=15):
     try:process=subprocess.Popen(args,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
@@ -133,7 +134,7 @@ def api_provider_profiles():
         if not row.get("id") or not row.get("name"):continue
         home=str(row.get("codex_home","")).replace("~",str(Path.home()),1)
         configured=bool(row.get("configured")) and (Path(home)/"config.toml").is_file() and (Path(home)/"auth.json").is_file()
-        out.append({"id":"provider:"+row["id"],"name":row["name"],"kind":"api","provider":row["id"],"codexHome":home,"configured":configured,"baseUrl":row.get("base_url","")})
+        out.append({"id":"provider:"+row["id"],"name":row["name"],"kind":"api","provider":row["id"],"codexHome":home,"configured":configured,"baseUrl":row.get("base_url",""),"usagePath":row.get("usage_path","")})
     return out
 
 def api_provider_profile():
@@ -141,6 +142,21 @@ def api_provider_profile():
 
 def api_profile_for(provider):
     return next((p for p in api_provider_profiles() if p.get("provider")==provider), {"name":provider or "备用 API"})
+
+def api_usage(profile):
+    """Read an explicitly configured provider usage endpoint; never expose the key."""
+    if not profile.get("configured") or not profile.get("usagePath") or not profile.get("baseUrl"): return None
+    key=profile.get("provider"); now=time.time(); cached=_API_USAGE_CACHE.get(key)
+    if cached and now-cached[0]<60:return cached[1]
+    try:
+        auth=json.loads((Path(profile["codexHome"])/"auth.json").read_text(encoding="utf-8")); token=auth.get("OPENAI_API_KEY","")
+        if not token:return None
+        url=profile["baseUrl"].rstrip("/")+profile["usagePath"]
+        request=urllib.request.Request(url,headers={"Authorization":"Bearer "+token})
+        with urllib.request.urlopen(request,timeout=4) as response: data=json.loads(response.read().decode("utf-8"))
+        result={"remaining":data.get("remaining"),"unit":data.get("unit",""),"usage":data.get("usage") or {}}
+    except Exception: result=None
+    _API_USAGE_CACHE[key]=(now,result); return result
 
 def bridge_window_info(path,folder=""):
     now=time.time(); candidates=[]
@@ -699,7 +715,16 @@ class App(QWidget):
     def open_project_ideas(self,window):
         dialog=ProjectIdeasDialog(self.idea_store,window,self); dialog.exec() if hasattr(dialog,"exec") else dialog.exec_(); self.refresh()
     def account_panel(self):
-        rows=profiles(); api_profiles=api_provider_profiles(); api_ready=sum(p.get("configured",False) for p in api_profiles); p=QFrame(); p.setObjectName("accountPanel"); p.setStyleSheet("QFrame#accountPanel{background:#f7fcfa;border:1px solid #dbeee7;border-radius:11px} QLabel{background:transparent}"); v=QVBoxLayout(p); v.setContentsMargins(13,10,13,12); v.setSpacing(7); head=QHBoxLayout(); heading=QLabel("账号额度"); heading.setFont(QFont("Noto Sans CJK SC",14,QFont.Bold)); heading.setStyleSheet("color:#0f172a"); head.addWidget(heading); subtitle=QLabel("自动读取 Codex Switch"); subtitle.setStyleSheet("color:#64748b;font-size:10px"); head.addWidget(subtitle); head.addStretch(); count=QLabel(f"{len(rows)} 个 Plus · {api_ready} 个 API 备用"); count.setStyleSheet("color:#047857;background:#ecfdf5;padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700"); head.addWidget(count); v.addLayout(head); h=QHBoxLayout(); h.setSpacing(7)
+        rows=profiles(); api_profiles=api_provider_profiles(); api_ready=sum(p.get("configured",False) for p in api_profiles); p=QFrame(); p.setObjectName("accountPanel"); p.setStyleSheet("QFrame#accountPanel{background:#f7fcfa;border:1px solid #dbeee7;border-radius:11px} QLabel{background:transparent}"); v=QVBoxLayout(p); v.setContentsMargins(13,10,13,12); v.setSpacing(7); head=QHBoxLayout(); heading=QLabel("账号额度"); heading.setFont(QFont("Noto Sans CJK SC",14,QFont.Bold)); heading.setStyleSheet("color:#0f172a"); head.addWidget(heading); subtitle=QLabel("自动读取 Codex Switch"); subtitle.setStyleSheet("color:#64748b;font-size:10px"); head.addWidget(subtitle); head.addStretch(); count=QLabel(f"{len(rows)} 个 Plus · {api_ready} 个 API 备用"); count.setStyleSheet("color:#047857;background:#ecfdf5;padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700"); head.addWidget(count); v.addLayout(head)
+        if api_profiles:
+            usage_row=QHBoxLayout(); usage_row.setSpacing(8)
+            for api in api_profiles:
+                if not api.get("configured"): continue
+                usage=api_usage(api); remaining=usage.get("remaining") if usage else None
+                text=f"{api.get('name')} · " + (f"剩余 {remaining:g}{usage.get('unit','')}" if isinstance(remaining,(int,float)) else "暂无用量接口")
+                label=QLabel(text); label.setStyleSheet("color:#0369a1;background:#e0f2fe;padding:3px 7px;border-radius:5px;font-size:10px;font-weight:600"); usage_row.addWidget(label)
+            usage_row.addStretch(); v.addLayout(usage_row)
+        h=QHBoxLayout(); h.setSpacing(7)
         for profile in rows:
             limits=profile.get("limits",{}); primary=limits.get("primary") or {}; secondary=limits.get("secondary") or {}
             card=QFrame(); card.setObjectName("quotaCard"); card.setStyleSheet("QFrame#quotaCard{background:white;border:1px solid #dbe7e2;border-radius:8px} QLabel{background:transparent}"); c=QVBoxLayout(card); c.setContentsMargins(9,7,9,8); c.setSpacing(3); name_row=QHBoxLayout(); name=QLabel(profile.get("name","未命名")); name.setFont(QFont("Noto Sans CJK SC",11,QFont.Bold)); name.setStyleSheet("color:#0f172a"); name_row.addWidget(name,1); windows_count=sum(bool(window) for window in (primary,secondary)); window_badge=QLabel(f"{windows_count} 个额度周期"); window_badge.setStyleSheet("color:#64748b;background:#f1f5f9;padding:2px 5px;border-radius:4px;font-size:8px"); name_row.addWidget(window_badge); c.addLayout(name_row)

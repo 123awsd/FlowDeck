@@ -8,6 +8,15 @@
       "codex_home": "~/.codex-heju",
       "auth": "api_key",
       "configured": true
+    },
+    {
+      "id": "fastlab-api",
+      "name": "fastlab-api",
+      "base_url": "http://zjufast.kmras.com:50001/v1",
+      "codex_home": "~/.codex-providers/fastlab-api",
+      "auth": "api_key",
+      "usage_path": "/usage",
+      "configured": true
     }
   ]
 }
