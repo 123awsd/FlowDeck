@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 from .curriculum import CurriculumLibrary, CurriculumStore, PATH_LABELS, STATE_LABELS
+from .conversation_metrics import compact_tokens, elapsed_label, session_metrics
 from .lessons import LessonChatStore, LessonStore, ask_lesson_tutor, generate_lesson
 from .learning_feed import PREFERENCES_PATH, Store as LearningStore, build_feed as build_learning_feed_v2, context_profile
 from .paths import ASSETS_DIR, DATA_DIR, PROJECT_ROOT
@@ -521,6 +522,35 @@ class ProjectIdeasDialog(QDialog):
         if QMessageBox.question(self,"删除灵感","确定删除这条灵感吗？",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)==QMessageBox.Yes:self.store.delete(idea["id"]); self.render()
 
 
+class ConversationDetailsDialog(QDialog):
+    def __init__(self,project,conversations,parent=None):
+        super().__init__(parent); self.setWindowTitle("对话详情 · "+project.get("folder","项目")); self.setMinimumSize(520,480); self.resize(580,620); self.setWindowFlag(Qt.WindowStaysOnTopHint,True)
+        self.setStyleSheet("QDialog{background:#f8fafc} QLabel{font-family:'Noto Sans CJK SC';color:#334155} QFrame#metricCard{background:white;border:1px solid #e2e8f0;border-radius:9px}")
+        outer=QVBoxLayout(self); title=QLabel(project.get("folder","项目")); title.setFont(QFont("Noto Sans CJK SC",17,QFont.Bold)); outer.addWidget(title)
+        note=QLabel(f"共 {len(conversations)} 个本地对话 · Token 数据只读自本机 Codex 会话"); note.setStyleSheet("color:#64748b;font-size:10px"); outer.addWidget(note)
+        scroll=QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame); body=QWidget(); layout=QVBoxLayout(body); layout.setContentsMargins(0,5,0,5); layout.setSpacing(8)
+        for index,conversation in enumerate(conversations):
+            metrics=session_metrics(conversation["file"]); total=metrics.get("total",{}); last=metrics.get("last",{}); card=QFrame(); card.setObjectName("metricCard"); grid=QGridLayout(card); grid.setContentsMargins(12,10,12,11); grid.setHorizontalSpacing(18); grid.setVerticalSpacing(6)
+            heading=QLabel(("当前对话 · " if index==0 else "")+conversation.get("title","新对话")); heading.setWordWrap(True); heading.setStyleSheet("color:#0f172a;font-weight:700"); grid.addWidget(heading,0,0,1,4)
+            context=metrics.get("context_percent"); running=index==0 and project.get("status")=="正在运行"; time_start=metrics.get("turn_started_at") if running and metrics.get("turn_running") else metrics.get("started_at"); values=(("累计 Token",compact_tokens(total.get("total_tokens"))),("输入",compact_tokens(total.get("input_tokens"))),("缓存",compact_tokens(total.get("cached_input_tokens"))),("新增输入",compact_tokens(max(0,int(total.get("input_tokens") or 0)-int(total.get("cached_input_tokens") or 0)))),("输出",compact_tokens(total.get("output_tokens"))),("推理",compact_tokens(total.get("reasoning_output_tokens"))),("缓存复用率",f"{metrics.get('cache_percent')}%" if metrics.get("cache_percent") is not None else "--"),("当前上下文",f"约 {context}% · {compact_tokens(metrics.get('context_tokens'))}/{compact_tokens(metrics.get('context_window'))}" if context is not None else "--"),("最近一轮",f"{compact_tokens(last.get('total_tokens'))} Token"),("运行时间",elapsed_label(time_start,metrics.get("updated_at"),running)))
+            for position,(label,value) in enumerate(values):
+                row=position//2+1; column=(position%2)*2; caption=QLabel(label); caption.setStyleSheet("color:#94a3b8;font-size:9px"); number=QLabel(value); number.setStyleSheet("color:#334155;font-size:10px;font-weight:700"); grid.addWidget(caption,row,column); grid.addWidget(number,row,column+1)
+            layout.addWidget(card)
+        if not conversations:
+            empty=QLabel("这个项目还没有可读取的本地对话"); empty.setAlignment(Qt.AlignCenter); empty.setStyleSheet("color:#64748b;padding:30px"); layout.addWidget(empty)
+        layout.addStretch(); scroll.setWidget(body); outer.addWidget(scroll,1); close=QPushButton("关闭"); close.clicked.connect(self.accept); outer.addWidget(close,0,Qt.AlignRight)
+
+
+class NetworkDetailsDialog(QDialog):
+    def __init__(self,network,parent=None):
+        super().__init__(parent); self.setWindowTitle("网络详情"); self.setMinimumSize(440,330); self.resize(480,380); self.setWindowFlag(Qt.WindowStaysOnTopHint,True)
+        self.setStyleSheet("QDialog{background:#f8fafc} QLabel{font-family:'Noto Sans CJK SC'} QFrame{background:white;border:1px solid #e2e8f0;border-radius:9px}"); outer=QVBoxLayout(self); title=QLabel("网络详情"); title.setFont(QFont("Noto Sans CJK SC",17,QFont.Bold)); outer.addWidget(title)
+        proxy=network.get("proxy",{}); card=QFrame(); grid=QGridLayout(card); grid.setContentsMargins(13,11,13,12); rows=(("实时下载",format_rate(network.get("download",0))),("实时上传",format_rate(network.get("upload",0))),("当前网卡",network.get("interface","未知网卡")),("Mihomo / Clash","运行中" if proxy.get("running") else "未运行"),("当前节点",proxy.get("node") or "控制接口不可读"),("TUN","已开启" if proxy.get("tun") is True else ("未开启" if proxy.get("tun") is False else "状态未知")),("系统代理",str(proxy.get("system_proxy") or "未知")),("终端代理","已设置" if proxy.get("terminal_proxy") else "未设置"))
+        for index,(label,value) in enumerate(rows):
+            caption=QLabel(label); caption.setStyleSheet("color:#64748b;font-size:10px"); number=QLabel(value); number.setStyleSheet("color:#0f172a;font-weight:700"); grid.addWidget(caption,index,0); grid.addWidget(number,index,1)
+        outer.addWidget(card); hint=QLabel("这里只做本机只读检测；服务可达性、线路追踪和真实测速将在下一阶段加入。") ; hint.setWordWrap(True); hint.setStyleSheet("color:#64748b;font-size:10px"); outer.addWidget(hint); outer.addStretch(); close=QPushButton("关闭"); close.clicked.connect(self.accept); outer.addWidget(close,0,Qt.AlignRight)
+
+
 class App(QWidget):
     def __init__(self):
         super().__init__()
@@ -686,7 +716,8 @@ class App(QWidget):
                 divider=QFrame(); divider.setFrameShape(QFrame.VLine); divider.setStyleSheet("color:#e2e8f0;background:#e2e8f0"); divider.setFixedWidth(1); metrics_row.addWidget(divider)
         outer.addWidget(overview)
         details=QFrame(); details.setObjectName("systemDetails"); details.setMinimumHeight(49); details.setStyleSheet("QFrame#systemDetails{background:white;border:1px solid #e2e8f0;border-radius:9px}"); detail_grid=QGridLayout(details); detail_grid.setContentsMargins(12,7,12,7); detail_grid.setHorizontalSpacing(28)
-        detail_grid.addWidget(QLabel("网络"),0,0); detail_grid.addWidget(QLabel(f"↓ {format_rate(network.get('download',0))}   ↑ {format_rate(network.get('upload',0))}"),1,0); detail_grid.addWidget(QLabel("磁盘读写"),0,1); detail_grid.addWidget(QLabel(f"读 {format_rate(disk_io.get('read',0))}   写 {format_rate(disk_io.get('write',0))}"),1,1); detail_grid.addWidget(QLabel("Swap"),0,2); detail_grid.addWidget(QLabel(f"{memory.get('swap_percent',0):.0f}% · {format_bytes(memory.get('swap_used'))} / {format_bytes(memory.get('swap_total'))}"),1,2)
+        proxy=network.get("proxy",{}); proxy_name=(proxy.get("node") or ("已运行" if proxy.get("running") else "未运行")); network_value=QWidget(); network_line=QHBoxLayout(network_value); network_line.setContentsMargins(0,0,0,0); network_line.setSpacing(7); speed=QLabel(f"↓ {format_rate(network.get('download',0))}   ↑ {format_rate(network.get('upload',0))} · {network.get('interface','未知网卡')} · {proxy_name}"); speed.setStyleSheet("color:#0f172a;font-size:11px;font-weight:600"); network_line.addWidget(speed,1); network_more=QPushButton("详情"); network_more.setStyleSheet("padding:3px 8px;font-size:9px"); network_more.clicked.connect(self.open_network_details); network_line.addWidget(network_more)
+        detail_grid.addWidget(QLabel("网络"),0,0); detail_grid.addWidget(network_value,1,0); detail_grid.addWidget(QLabel("磁盘读写"),0,1); detail_grid.addWidget(QLabel(f"读 {format_rate(disk_io.get('read',0))}   写 {format_rate(disk_io.get('write',0))}"),1,1); detail_grid.addWidget(QLabel("Swap"),0,2); detail_grid.addWidget(QLabel(f"{memory.get('swap_percent',0):.0f}% · {format_bytes(memory.get('swap_used'))} / {format_bytes(memory.get('swap_total'))}"),1,2)
         for i in range(3):detail_grid.itemAtPosition(0,i).widget().setStyleSheet("color:#64748b;font-size:10px;font-weight:700"); detail_grid.itemAtPosition(1,i).widget().setStyleSheet("color:#0f172a;font-size:11px;font-weight:600")
         outer.addWidget(details)
         disk_box=QFrame(); disk_box.setObjectName("diskBox"); disk_box.setMinimumHeight(40+len(disks)*36); disk_box.setStyleSheet("QFrame#diskBox{background:white;border:1px solid #e2e8f0;border-radius:9px}"); disk_layout=QVBoxLayout(disk_box); disk_layout.setContentsMargins(12,8,12,9); disk_layout.setSpacing(5); disk_head=QHBoxLayout(); disk_title=QLabel("磁盘空间"); disk_title.setStyleSheet("color:#0f172a;font-weight:700"); disk_head.addWidget(disk_title); disk_head.addStretch(); disk_count=QLabel(f"{len(disks)} 个本地挂载"); disk_count.setStyleSheet("color:#64748b;font-size:10px"); disk_head.addWidget(disk_count); disk_layout.addLayout(disk_head)
@@ -718,8 +749,11 @@ class App(QWidget):
                 preview=QLabel("✦  "+open_ideas[0].get("text","")[:72]); preview.setMinimumWidth(0); preview.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred); preview.setToolTip(open_ideas[0].get("text","")); preview.setStyleSheet("color:#7c3aed;font-size:10px"); info.addWidget(preview)
             h.addLayout(info,1)
             conversations,total_conversations=project_conversations(w["path"])
-            chats=QToolButton(); chats.setText(f"对话 {total_conversations}  ▾"); chats.setPopupMode(QToolButton.InstantPopup); chats.setCursor(Qt.PointingHandCursor); chats.setToolTip("只显示属于这个项目的 Codex 对话"); chats.setStyleSheet("QToolButton{padding:7px 11px;background:#f5f3ff;color:#6d28d9;border:1px solid #c4b5fd;border-radius:7px;font-weight:700} QToolButton:hover{background:#ede9fe} QToolButton::menu-indicator{image:none}")
-            chat_menu=QMenu(chats); caption=chat_menu.addAction(f"此项目最近对话 · 共 {total_conversations} 条"); caption.setEnabled(False)
+            current_metrics=session_metrics(conversations[0]["file"]) if conversations else {}; current_total=current_metrics.get("total",{}); current_last=current_metrics.get("last",{}); context_percent=current_metrics.get("context_percent")
+            if conversations:
+                running=state=="正在运行"; time_start=current_metrics.get("turn_started_at") if running and current_metrics.get("turn_running") else current_metrics.get("started_at"); active_line=QLabel(f"上下文 {'约 '+str(context_percent)+'%' if context_percent is not None else '--'}  ·  运行 {elapsed_label(time_start,current_metrics.get('updated_at'),running)}  ·  本轮 {compact_tokens(current_last.get('total_tokens'))}  ·  当前：{conversations[0]['title']}"); active_line.setMinimumWidth(0); active_line.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred); active_line.setToolTip(active_line.text()); active_line.setStyleSheet("color:#64748b;font-size:9px"); info.addWidget(active_line)
+            chats=QToolButton(); chats.setText(f"详情 {total_conversations}  ▾"); chats.setPopupMode(QToolButton.InstantPopup); chats.setCursor(Qt.PointingHandCursor); chats.setToolTip("查看当前对话数据和这个项目的其他对话"); chats.setStyleSheet("QToolButton{padding:7px 11px;background:#f5f3ff;color:#6d28d9;border:1px solid #c4b5fd;border-radius:7px;font-weight:700} QToolButton:hover{background:#ede9fe} QToolButton::menu-indicator{image:none}")
+            chat_menu=QMenu(chats); detail_action=chat_menu.addAction("查看对话数据"); detail_action.triggered.connect(lambda _,x=w,rows=list(conversations):self.open_conversation_details(x,rows)); caption=chat_menu.addAction(f"此项目最近对话 · 共 {total_conversations} 条"); caption.setEnabled(False)
             if conversations:chat_menu.addSeparator()
             for conversation in conversations:
                 stamp=datetime.fromtimestamp(conversation["mtime"]).strftime("%m-%d %H:%M")
@@ -751,6 +785,10 @@ class App(QWidget):
         self.box.addWidget(p)
     def open_project_ideas(self,window):
         dialog=ProjectIdeasDialog(self.idea_store,window,self); dialog.exec() if hasattr(dialog,"exec") else dialog.exec_(); self.refresh()
+    def open_conversation_details(self,window,conversations):
+        dialog=ConversationDetailsDialog(window,conversations,self); dialog.exec() if hasattr(dialog,"exec") else dialog.exec_()
+    def open_network_details(self):
+        dialog=NetworkDetailsDialog(self.system_metrics.get("network",{}),self); dialog.exec() if hasattr(dialog,"exec") else dialog.exec_()
     def account_panel(self):
         rows=profiles(); api_profiles=api_provider_profiles(); api_ready=sum(p.get("configured",False) for p in api_profiles); p=QFrame(); p.setObjectName("accountPanel"); p.setStyleSheet("QFrame#accountPanel{background:#f7fcfa;border:1px solid #dbeee7;border-radius:11px} QLabel{background:transparent}"); v=QVBoxLayout(p); v.setContentsMargins(13,10,13,12); v.setSpacing(7); head=QHBoxLayout(); heading=QLabel("账号额度"); heading.setFont(QFont("Noto Sans CJK SC",14,QFont.Bold)); heading.setStyleSheet("color:#0f172a"); head.addWidget(heading); subtitle=QLabel("自动读取 Codex Switch"); subtitle.setStyleSheet("color:#64748b;font-size:10px"); head.addWidget(subtitle); head.addStretch(); count=QLabel(f"{len(rows)} 个 Plus · {api_ready} 个 API 备用"); count.setStyleSheet("color:#047857;background:#ecfdf5;padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700"); head.addWidget(count); v.addLayout(head)
         if api_profiles:

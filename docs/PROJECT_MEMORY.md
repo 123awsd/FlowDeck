@@ -1,6 +1,6 @@
 # 项目长期记忆
 
-最后更新：2026-09-07
+最后更新：2026-09-08
 
 这份文件是项目的稳定上下文和专题文档索引。它解决“更换 Codex 对话或几个月后继续开发时，不能只依赖聊天记忆”的问题。
 
@@ -15,11 +15,11 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 | 子系统 | 状态 | 当前责任 | 主要文件 |
 | --- | --- | --- | --- |
 | 悬浮窗与导航 | 已实现 | 置顶悬浮球、展开/收起、四个主页面 | `src/codex_control_tower/ui.py` |
-| VS Code 窗口监控 | 已实现 | 自动发现本地和 SSH 窗口、项目、运行/完成状态、待查看提醒和聚焦 | `src/codex_control_tower/ui.py`、`extensions/vscode-bridge/`、`extensions/remote-monitor/` |
+| VS Code 窗口监控 | 已实现 | 自动发现本地和 SSH 窗口、项目、运行/完成状态、当前对话 Token 摘要、待查看提醒和聚焦 | `src/codex_control_tower/ui.py`、`src/codex_control_tower/conversation_metrics.py`、`extensions/vscode-bridge/` |
 | 账号与额度 | 已实现 | 读取 Codex Switch 账号和额度周期，过滤无额度账号，切换后聚焦目标窗口 | `src/codex_control_tower/ui.py`、`extensions/vscode-bridge/` |
 | 今日待办 | 已实现 | 本地待办、并行激活、编辑、优先级、当日完成进度、系统中文输入法 | `src/codex_control_tower/ui.py` |
 | 项目灵感 | 已实现 | 按 VS Code 项目记录、预览、编辑和处理暂未实现的想法 | `src/codex_control_tower/project_ideas.py`、`src/codex_control_tower/ui.py` |
-| 系统监控 | 已实现 | CPU、内存、Swap、GPU/显存、网络、磁盘和高占用进程 | `src/codex_control_tower/system_monitor.py`、`src/codex_control_tower/ui.py` |
+| 系统监控 | 已实现 | CPU、内存、Swap、GPU/显存、网络速度/网卡/代理摘要、磁盘和高占用进程 | `src/codex_control_tower/system_monitor.py`、`src/codex_control_tower/ui.py` |
 | 前沿追踪 | 已实现 | 具身智能宽召回、质量门槛、五通道推荐、视频、反馈和有界存储 | `src/codex_control_tower/learning_feed.py`、`config/learning_preferences.json`、`src/codex_control_tower/ui.py` |
 | 系统学习 | 已实现 | VLA reviewed draft、三条路线、审查门禁与实际微课正文；关键课内置，其余按需生成并缓存 | `src/codex_control_tower/curriculum.py`、`src/codex_control_tower/lessons.py`、`learning/domains/vla/` |
 | 单词闪卡 | 已实现 | 主动回忆、三档间隔复习、当日进度、朗读、收藏、自定义词库和猫猫反馈 | `src/codex_control_tower/vocabulary.py`、`learning/vocabulary/`、`assets/vocab-cats/` |
@@ -74,7 +74,7 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 - 单词页支持仅在该页面生效的键盘操作；朗读优先复用 `Alt+Q` 的本机 Piper 服务与声音，失败时依次退回在线 Edge 和 eSpeak，临时音频不累积。
 - 单词切换后自动朗读；旧播放必须可取消，并在快速连续切词时只朗读最终停留的单词，不能出现音画不同步。
 
-完整设计见 [工作与灵感管理](WORK_MANAGEMENT.md)、[账号与 API 服务商切换](ACCOUNT_PROVIDERS.md)、[领域学习系统](LEARNING_SYSTEM.md) 和 [单词闪卡](VOCABULARY.md)。
+完整设计见 [工作与灵感管理](WORK_MANAGEMENT.md)、[账号与 API 服务商切换](ACCOUNT_PROVIDERS.md)、[对话与网络可观测性](OBSERVABILITY.md)、[领域学习系统](LEARNING_SYSTEM.md) 和 [单词闪卡](VOCABULARY.md)。
 
 ## 数据与增长边界
 
@@ -106,3 +106,4 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 - 2026-09-07：废弃独立 VS Code 用户目录方案及共享会话数据库实验。安全路由 v2 保留原窗口，以窗口会话和宿主 PID 路由独立 `CODEX_HOME`，通过 `/proc` 验证实际子进程后提交；历史改为跨独立运行时只读聚合，桥接升级至 0.2.0。
 - 2026-09-07：修复本地、SSH、Dev Container 同名工作区造成的路径误判和桥接恢复超时；实时桥接身份优先，恢复请求按窗口 ID 与目标宿主 PID 隔离。
 - 2026-09-07：备用 API 密钥通过 Codex 登录命令持久化在各自独立的本地认证目录；应用必须验证 `apikey` 模式和密钥存在，不能再以 `auth.json` 文件存在作为配置成功依据。
+- 2026-09-08：任务卡片增加渐进式对话可观测性，默认只显示上下文、运行时间和本轮 Token，详情展示完整本地统计；系统监控增加网速、网卡与代理状态摘要，主动线路诊断和测速留到后续阶段。

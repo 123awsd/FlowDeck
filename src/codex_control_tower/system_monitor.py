@@ -4,10 +4,12 @@ The collector deliberately keeps no history on disk.  It reads procfs/sysfs
 and asks nvidia-smi for GPU data when available; callers decide how many
 recent samples to retain in memory.
 """
+import json
 import os
 import shutil
 import subprocess
 import time
+import urllib.request
 from pathlib import Path
 
 
@@ -97,6 +99,58 @@ def _network_bytes():
             total_rx += int(_number(columns[0]))
             total_tx += int(_number(columns[8]))
     return total_rx, total_tx
+
+
+def _default_interface():
+    for line in _read_lines("/proc/net/route")[1:]:
+        fields = line.split()
+        if len(fields) > 3 and fields[1] == "00000000" and int(fields[3], 16) & 2:
+            return fields[0]
+    return "未知网卡"
+
+
+_PROXY_CACHE = (0.0, {})
+
+
+def _proxy_snapshot():
+    global _PROXY_CACHE
+    now = time.monotonic()
+    if now - _PROXY_CACHE[0] < 5:
+        return dict(_PROXY_CACHE[1])
+    running = False
+    for directory in Path("/proc").glob("[0-9]*"):
+        try:
+            command = (directory / "cmdline").read_bytes().decode(errors="ignore").lower()
+            if "mihomo" in command or "clash" in command:
+                running = True; break
+        except OSError:
+            pass
+    node = ""
+    tun = None
+    if running:
+        for port in (9090, 9097):
+            try:
+                request = urllib.request.Request(f"http://127.0.0.1:{port}/proxies/GLOBAL")
+                with urllib.request.urlopen(request, timeout=.25) as response:
+                    node = json.loads(response.read()).get("now", "")
+                request = urllib.request.Request(f"http://127.0.0.1:{port}/configs")
+                with urllib.request.urlopen(request, timeout=.25) as response:
+                    tun = bool((json.loads(response.read()).get("tun") or {}).get("enable"))
+                break
+            except Exception:
+                continue
+    try:
+        mode = subprocess.run(
+            ["gsettings", "get", "org.gnome.system.proxy", "mode"], capture_output=True,
+            text=True, timeout=.5,
+        ).stdout.strip().strip("'")
+    except (OSError, subprocess.SubprocessError):
+        mode = "未知"
+    terminal = bool(os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("ALL_PROXY") or
+                    os.environ.get("http_proxy") or os.environ.get("https_proxy") or os.environ.get("all_proxy"))
+    result = {"running": running, "node": node, "tun": tun, "system_proxy": mode, "terminal_proxy": terminal}
+    _PROXY_CACHE = (now, result)
+    return dict(result)
 
 
 def _disk_io():
@@ -233,11 +287,12 @@ class SystemMonitor:
             "memory": memory,
             "gpu": gpu,
             "disks": _disks(),
-            "network": {"download": max(0, rx - old_rx) / elapsed, "upload": max(0, tx - old_tx) / elapsed},
+            "network": {"download": max(0, rx - old_rx) / elapsed, "upload": max(0, tx - old_tx) / elapsed,
+                        "interface": _default_interface(), "proxy": _proxy_snapshot()},
             "disk_io": {"read": max(0, read_bytes - old_read) / elapsed, "write": max(0, write_bytes - old_write) / elapsed},
             "processes": _process_snapshot(self._process_previous, self._previous_time, now),
         }
 
     @staticmethod
     def empty():
-        return {"timestamp": 0, "cpu": {"percent": 0, "cores": os.cpu_count() or 1, "load": 0, "temperature": None}, "memory": {"total": 0, "used": 0, "available": 0, "percent": 0, "swap_total": 0, "swap_used": 0, "swap_percent": 0}, "gpu": [], "disks": [], "network": {"download": 0, "upload": 0}, "disk_io": {"read": 0, "write": 0}, "processes": []}
+        return {"timestamp": 0, "cpu": {"percent": 0, "cores": os.cpu_count() or 1, "load": 0, "temperature": None}, "memory": {"total": 0, "used": 0, "available": 0, "percent": 0, "swap_total": 0, "swap_used": 0, "swap_percent": 0}, "gpu": [], "disks": [], "network": {"download": 0, "upload": 0, "interface": "未知网卡", "proxy": {}}, "disk_io": {"read": 0, "write": 0}, "processes": []}
