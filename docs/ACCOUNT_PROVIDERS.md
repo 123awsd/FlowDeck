@@ -17,6 +17,7 @@ Control Tower 同时支持两类 Codex 认证来源：
 - 每个备用 API 使用权限受限的独立 `CODEX_HOME`，例如 `~/.codex-heju` 或 `~/.codex-providers/<provider>`。
 - 每个 Plus/API 运行时都拥有完整、独立的 `CODEX_HOME`。严禁共享或链接 `state_*.sqlite`、WAL、IPC、锁、日志、会话目录和附件目录。
 - 路由身份由 `vscode.env.sessionId + workspace fingerprint + extension host PID` 组成，而不是只用文件夹路径；同一文件夹开两个窗口时，聚焦后的目标宿主 PID 决定请求归属。
+- 窗口路径优先采用桥接最近上报的真实工作区；VS Code `workspaceStorage` 只作为兜底。同名本地、SSH、Dev Container 历史记录不能靠文件夹名直接取第一条。
 - VS Code 完全关闭后，旧窗口会话身份失效；下次新开默认回到订阅，避免把旧 API 路由误套到同路径的新窗口。
 - API 切换保留原 VS Code 窗口、用户目录、扩展、布局和打开文件，只重启目标扩展宿主中的 Codex `app-server` 子进程。
 - 本地启动补丁只把目标 `CODEX_HOME` 传给 Codex 子进程，不改模型、服务商配置或认证内容。服务商行为仍由该运行时自己的 `config.toml` 和 `auth.json` 决定。
@@ -55,3 +56,7 @@ Control Tower 同时支持两类 Codex 认证来源：
 - 如果服务商提供稳定的余额查询 API，再在不上传项目数据的前提下增加余额展示。
 - 增加接口时，在 `config/api_providers.json` 增加一个条目，并为它准备独立的 `CODEX_HOME`；不要复用 Plus 的 `~/.codex`。
 - 对第三方端点做小型可用性检查，但不实现失败后的静默自动切换。
+
+## 修复记录
+
+- 2026-09-07：修复同名本地与容器工作区导致的桥接恢复超时。恢复状态改为按窗口 ID 隔离，重载请求绑定扩展宿主 PID，实时桥接路径覆盖含糊的历史路径。

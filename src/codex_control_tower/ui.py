@@ -159,20 +159,41 @@ def api_usage(profile):
     except Exception: result=None
     _API_USAGE_CACHE[key]=(now,result); return result
 
+def select_bridge_info(path,folder,rows):
+    """Prefer live bridge identity over ambiguous VS Code workspace history."""
+    unique={}
+    for info in rows:
+        pid=info.get("pid")
+        if pid and info.get("at",0)>unique.get(pid,{}).get("at",0):unique[pid]=info
+    rows=list(unique.values())
+    exact=[info for info in rows if path and path in info.get("paths",[])]
+    if exact:
+        exact.sort(key=lambda info:(bool(info.get("focused")),info.get("at",0)),reverse=True)
+        return exact[0]
+    named=[info for info in rows if folder and info.get("name")==folder and info.get("bridgeVersion")=="0.2.0"]
+    focused=[info for info in named if info.get("focused")]
+    if focused:
+        return max(focused,key=lambda info:info.get("at",0))
+    return named[0] if len(named)==1 else {}
+
 def bridge_window_info(path,folder=""):
     now=time.time(); candidates=[]
     if path:
         candidates.extend(BRIDGE_DIR.glob(f"ready-{path.encode('utf-8').hex()}-*.json"))
         candidates.append(BRIDGE_DIR/f"ready-{path.encode('utf-8').hex()}.json")
     if folder:candidates.append(BRIDGE_DIR/f"ready-name-{folder.encode('utf-8').hex()}.json")
+    # A stale workspaceStorage entry may resolve an identically named local,
+    # SSH or container workspace to the wrong path. Fresh v2 markers carry the
+    # actual path and are the authoritative fallback.
+    candidates.extend(BRIDGE_DIR.glob("ready-*-*.json"))
+    candidates.extend(BRIDGE_DIR.glob("ready-active-*.json"))
     rows=[]
-    for ready in candidates:
+    for ready in set(candidates):
         try:
             info=json.loads(ready.read_text(encoding="utf-8"))
             if now-info.get("at",0)/1000<8:rows.append(info)
         except Exception:pass
-    rows.sort(key=lambda info:(bool(info.get("focused")),info.get("at",0)),reverse=True)
-    return rows[0] if rows else {}
+    return select_bridge_info(path,folder,rows)
 
 def codex_session_roots():
     """Return independent runtime session roots for read-only aggregation."""
@@ -363,7 +384,7 @@ def scan():
         if not (klass.lower().startswith("code.") or "visual studio code" in title.lower()):continue
         title=title.replace(" - Visual Studio Code","").strip(); name=title.split(" - ")[-1].strip()
         path=find_path(name); initial_bridge=bridge_window_info(path,name)
-        if not path and initial_bridge.get("paths"):path=initial_bridge["paths"][0]
+        if initial_bridge.get("paths"):path=initial_bridge["paths"][0]
         state=extension_state(workspace_db(path)) if path and workspace_db(path) else {}
         workspace_id=state.get("codexSwitch.activeProfileId.default"); profile=by_id.get(workspace_id or global_id,{})
         if " [SSH:" in name:status,completed,session_account=remote_session_status(path)
@@ -1244,33 +1265,38 @@ class App(QWidget):
     def recover_bridge_then_switch(self,w,profile,focus_after=False,provider_switch=False):
         path=w.get("path","")
         if not path:return
-        if path in self.pending_bridge_recovery:return
+        window_key=w.get("id") or path
+        if window_key in self.pending_bridge_recovery:return
         installed,error=ensure_bridge_installed(force=True)
         if not installed:
             QMessageBox.warning(self,"桥接修复失败",f"无法修复 VS Code 桥接：{error}")
             return
-        self.pending_bridge_recovery[path]=(dict(w),profile,focus_after,provider_switch,0)
+        self.pending_bridge_recovery[window_key]=(dict(w),profile,focus_after,provider_switch,0)
         # VS Code does not always hot-load a newly installed extension. Ask only
         # the selected window to reload so the new bridge version can activate.
         request_id=str(uuid.uuid4()); requests=BRIDGE_DIR/"requests"; requests.mkdir(parents=True,exist_ok=True)
         payload={"id":request_id,"action":"reloadWindow","targetPath":path}
+        if w.get("bridge_pid"):payload["targetBridgePid"]=w["bridge_pid"]
         (requests/f"{request_id}.json").write_text(json.dumps(payload,ensure_ascii=False),encoding="utf-8")
         self.collapse()
-        QTimer.singleShot(600,lambda p=path:self.wait_bridge_recovery(p))
-    def wait_bridge_recovery(self,path):
-        pending=self.pending_bridge_recovery.get(path)
+        QTimer.singleShot(600,lambda key=window_key:self.wait_bridge_recovery(key))
+    def wait_bridge_recovery(self,window_key):
+        pending=self.pending_bridge_recovery.get(window_key)
         if not pending:return
         w,profile,focus_after,provider_switch,attempt=pending
         if self.bridge_ready(w,provider_switch):
-            self.pending_bridge_recovery.pop(path,None)
+            self.pending_bridge_recovery.pop(window_key,None)
+            refreshed=bridge_window_info(w.get("path",""),w.get("folder",""))
+            if refreshed.get("paths"):w["path"]=refreshed["paths"][0]
+            if refreshed.get("pid"):w["bridge_pid"]=refreshed["pid"]
             self.switch_account(w,profile,focus_after)
             return
         if attempt>=25:
-            self.pending_bridge_recovery.pop(path,None)
+            self.pending_bridge_recovery.pop(window_key,None)
             QMessageBox.warning(self,"桥接恢复超时","桥接已重新安装，但目标 VS Code 窗口未在预期时间内响应。请在窗口完全打开后再点一次“切换并聚焦”。")
             return
-        self.pending_bridge_recovery[path]=(w,profile,focus_after,provider_switch,attempt+1)
-        QTimer.singleShot(500,lambda p=path:self.wait_bridge_recovery(p))
+        self.pending_bridge_recovery[window_key]=(w,profile,focus_after,provider_switch,attempt+1)
+        QTimer.singleShot(500,lambda key=window_key:self.wait_bridge_recovery(key))
     def open_owned_conversation(self,w,conversation):
         owner=conversation.get("provider","subscription")
         if owner==w.get("provider","subscription"):
