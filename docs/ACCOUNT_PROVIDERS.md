@@ -25,6 +25,7 @@ Control Tower 同时支持两类 Codex 认证来源：
 - 第三方服务商可以看到通过该窗口发出的提示、上下文和工具交互，因此只应用于允许发送给该服务商的项目。
 - 当前本机 Codex CLI 0.114.0 不接受 `model_reasoning_effort = "ultra"`，备用配置使用其支持的最高档 `xhigh`。
 - 中转站余额不与 Plus 额度混合计算，界面仅标注“按量计费”；余额以服务商后台为准。
+- 目前中转站没有发现可确认的通用余额 API；后续可按接口配置增加余额查询。Codex 本地会话中的 token 使用可以按独立 `CODEX_HOME` 统计，但不等于服务商账单余额。
 
 ## 涉及文件
 
@@ -32,6 +33,7 @@ Control Tower 同时支持两类 Codex 认证来源：
 - `config/api_providers.json`（只放接口元数据，不放密钥）
 - `extensions/vscode-bridge/extension.js`
 - `extensions/vscode-bridge/package.json`
+- `extensions/vscode-bridge/extension.vsixmanifest`
 - 本地非仓库配置：`~/.codex-heju/`
 
 ## 下一步

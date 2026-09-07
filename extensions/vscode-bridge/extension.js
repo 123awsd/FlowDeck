@@ -15,6 +15,18 @@ let remoteStatus = null;
 let remoteStatusAt = 0;
 let transitioning = false;
 
+function ensureCodexWrapper() {
+  const wrapper = path.join(bridgeDir, 'codex-provider-wrapper.py');
+  const source = `#!/usr/bin/env python3\nimport glob,json,os,sys\nfrom pathlib import Path\nroot=Path.home()/'.codex-window-manager'\nprovider='subscription'\nfor marker in root.glob('ready-*.json'):\n    try:\n        data=json.loads(marker.read_text())\n        if int(data.get('pid',-1))==os.getppid():\n            provider=data.get('provider','subscription')\n            if provider!='subscription':\n                home=Path(data.get('codexHome',''))\n                if home.is_dir(): os.environ['CODEX_HOME']=str(home)\n            break\n    except Exception: pass\nif provider=='subscription': os.environ.pop('CODEX_HOME',None)\ncandidates=glob.glob(str(Path.home()/'.vscode/extensions/openai.chatgpt-*/bin/*/codex'))\nif not candidates: candidates=glob.glob(str(Path.home()/'.vscode/extensions/*/bin/*/codex'))\nif candidates: os.execv(max(candidates,key=os.path.getmtime),[max(candidates,key=os.path.getmtime),*sys.argv[1:]])\nraise SystemExit('Codex executable not found')\n`;
+  try { fs.mkdirSync(bridgeDir, { recursive: true }); fs.writeFileSync(wrapper, source, { mode: 0o700 }); fs.chmodSync(wrapper, 0o700); } catch {}
+  return wrapper;
+}
+
+async function configureCodexWrapper() {
+  const wrapper = ensureCodexWrapper();
+  try { await vscode.workspace.getConfiguration('chatgpt').update('cliExecutable', wrapper, vscode.ConfigurationTarget.Global); } catch {}
+}
+
 function cleanupTransientFiles() {
   const now = Date.now();
   if (now - lastCleanup < 300000) return;
@@ -44,6 +56,7 @@ function workspaceInfo() {
   const activeFile = vscode.window.activeTextEditor?.document?.uri?.scheme === 'file'
     ? path.resolve(vscode.window.activeTextEditor.document.uri.fsPath)
     : '';
+  const route = savedProvider();
   return {
     pid: process.pid,
     at: Date.now(),
@@ -53,6 +66,8 @@ function workspaceInfo() {
     remoteName: vscode.env.remoteName || '',
     remoteStatus,
     provider: activeProvider(),
+    providerName: route.providerName || '',
+    codexHome: route.codexHome || '',
     bridgeVersion
   };
 }
@@ -98,15 +113,37 @@ function applySavedProvider() {
   else process.env.CODEX_HOME = initialCodexHome;
 }
 
-function saveProvider(provider, codexHome) {
+function saveProvider(provider, codexHome, providerName) {
   fs.mkdirSync(providersDir, { recursive: true });
   if (provider === 'hejuapi') {
-    fs.writeFileSync(providerMarker(), JSON.stringify({ provider, codexHome: path.resolve(codexHome || hejuCodexHome), at: Date.now() }));
+    fs.writeFileSync(providerMarker(), JSON.stringify({ provider, codexHome: path.resolve(codexHome || hejuCodexHome), providerName: providerName || provider, at: Date.now() }));
   } else if (provider && provider !== 'subscription' && codexHome) {
-    fs.writeFileSync(providerMarker(), JSON.stringify({ provider, codexHome: path.resolve(codexHome), at: Date.now() }));
+    fs.writeFileSync(providerMarker(), JSON.stringify({ provider, codexHome: path.resolve(codexHome), providerName: providerName || provider, at: Date.now() }));
   } else {
     try { fs.unlinkSync(providerMarker()); } catch {}
   }
+}
+
+function applyProviderEnvironment(provider, codexHome) {
+  if (provider && provider !== 'subscription') process.env.CODEX_HOME = path.resolve(codexHome || hejuCodexHome);
+  else if (initialCodexHome === undefined) delete process.env.CODEX_HOME;
+  else process.env.CODEX_HOME = initialCodexHome;
+}
+
+function restartCodexChildren() {
+  const children = [];
+  try {
+    for (const name of fs.readdirSync('/proc')) {
+      if (!/^\d+$/.test(name)) continue;
+      const status = fs.readFileSync(path.join('/proc', name, 'status'), 'utf8');
+      const parent = /^PPid:\s+(\d+)/m.exec(status);
+      if (!parent || Number(parent[1]) !== process.pid) continue;
+      const command = fs.readFileSync(path.join('/proc', name, 'cmdline'), 'utf8').replaceAll('\0', ' ');
+      if (command.includes('openai.chatgpt') && command.includes('codex') && command.includes('app-server')) children.push(Number(name));
+    }
+  } catch {}
+  for (const pid of children) { try { process.kill(pid, 'SIGTERM'); } catch {} }
+  return children.length;
 }
 
 function isInside(file, root) {
@@ -178,10 +215,12 @@ async function processRequests() {
           const requestedHome = path.resolve(request.codexHome || hejuCodexHome);
           const allowedHome = requestedHome === path.resolve(hejuCodexHome) || requestedHome.startsWith(path.join(os.homedir(), '.codex-providers') + path.sep);
           if (provider !== 'subscription' && !allowedHome) throw new Error('API 配置目录不在允许范围内');
-          saveProvider(provider, requestedHome);
+          saveProvider(provider, requestedHome, request.profileName);
+          applyProviderEnvironment(provider, requestedHome);
           fs.writeFileSync(reopenMarker(), JSON.stringify({ profileName: request.profileName, at: Date.now() }));
           transitioning = true;
-          setTimeout(() => vscode.commands.executeCommand('workbench.action.restartExtensionHost'), 250);
+          restartCodexChildren();
+          setTimeout(() => { transitioning = false; vscode.commands.executeCommand('chatgpt.openSidebar'); }, 1200);
           return;
         }
         fs.writeFileSync(path.join(resultsDir, filename), JSON.stringify({ ok: true, profileName: request.profileName, provider, at: Date.now() }));
@@ -191,9 +230,11 @@ async function processRequests() {
       }
       if (activeProvider() !== 'subscription') {
         saveProvider('subscription');
+        applyProviderEnvironment('subscription');
         fs.writeFileSync(reopenMarker(), JSON.stringify({ profileName: request.profileName, at: Date.now() }));
         transitioning = true;
-        setTimeout(() => vscode.commands.executeCommand('workbench.action.restartExtensionHost'), 250);
+        restartCodexChildren();
+        setTimeout(() => { transitioning = false; vscode.commands.executeCommand('chatgpt.openSidebar'); }, 1200);
         return;
       }
       await vscode.commands.executeCommand('codex-switch.profile.activate', request.profileId);
@@ -218,6 +259,7 @@ async function reopenCodex() {
 
 function activate(context) {
   applySavedProvider();
+  configureCodexWrapper().catch(() => {});
   fs.mkdirSync(requestsDir, { recursive: true });
   const timer = setInterval(() => processRequests().catch(() => {}), 1000);
   context.subscriptions.push({ dispose: () => clearInterval(timer) });
