@@ -79,6 +79,8 @@ DEEPSEEK_API_KEY=你的密钥
 `extensions/vscode-bridge` 的本地安装版本；如果某个早先打开的窗口尚未加载桥接，第一次切换时会自动重新安装并热加载桥接，等待就绪后继续完成
 Codex Switch 账号切换、重启扩展宿主，并重新打开 Codex 侧栏。
 
+账号菜单还提供手动的一个或多个“API 备用”选项，公共元数据在 [`config/api_providers.json`](config/api_providers.json)中维护。它们各自使用独立 `CODEX_HOME`，只作为 Plus 额度不足时的按量计费备用通道；不会自动接管，也不会覆盖 Codex Switch 中现有的 Plus 登录。具体隔离和安全约束见 [`docs/ACCOUNT_PROVIDERS.md`](docs/ACCOUNT_PROVIDERS.md)。
+
 ## 跳转窗口
 
 “窗口标题（可选）”填写 Linux 窗口标题中的文字，程序会先用 `wmctrl -a` 聚焦已有窗口；聚焦失败时再执行 `code --reuse-window <项目路径>`。

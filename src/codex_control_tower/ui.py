@@ -29,6 +29,8 @@ PROFILE_FILE=Path.home()/".config/Code/User/globalStorage/woozy-masta.codex-swit
 GLOBAL_DB=Path.home()/".config/Code/User/globalStorage/state.vscdb"
 SEEN_FILE=DATA_DIR/"seen_sessions.json"
 BRIDGE_DIR=Path.home()/".codex-window-manager"
+API_CODEX_HOME=Path.home()/".codex-heju"
+API_PROVIDERS_FILE=PROJECT_ROOT/"config"/"api_providers.json"
 STATES=["Running","Needs input","Ready","Blocked","Done"]
 LABELS=dict(zip(STATES,["执行中","需要输入","已就绪","已阻塞","已完成"]))
 COLORS=dict(zip(STATES,["#2563eb","#d97706","#059669","#dc2626","#64748b"]))
@@ -121,6 +123,35 @@ def profiles():
             try:p["limits"]=json.loads((root/name).read_text()).get("rateLimits",{}); break
             except Exception:pass
     return rows
+
+def api_provider_profiles():
+    """Public provider metadata only; credentials remain in each private CODEX_HOME."""
+    try: raw=json.loads(API_PROVIDERS_FILE.read_text(encoding="utf-8")); rows=raw.get("providers",[])
+    except (OSError,ValueError): rows=[]
+    out=[]
+    for row in rows:
+        if not row.get("id") or not row.get("name"):continue
+        home=str(row.get("codex_home","")).replace("~",str(Path.home()),1)
+        configured=bool(row.get("configured")) and (Path(home)/"config.toml").is_file() and (Path(home)/"auth.json").is_file()
+        out.append({"id":"provider:"+row["id"],"name":row["name"],"kind":"api","provider":row["id"],"codexHome":home,"configured":configured,"baseUrl":row.get("base_url","")})
+    return out
+
+def api_provider_profile():
+    return next(iter(api_provider_profiles()), {"id":"provider:hejuapi","name":"备用 API","kind":"api","provider":"hejuapi","codexHome":str(API_CODEX_HOME),"configured":False})
+
+def api_profile_for(provider):
+    return next((p for p in api_provider_profiles() if p.get("provider")==provider), {"name":provider or "备用 API"})
+
+def bridge_window_info(path,folder=""):
+    now=time.time(); candidates=[]
+    if path:candidates.append(BRIDGE_DIR/f"ready-{path.encode('utf-8').hex()}.json")
+    if folder:candidates.append(BRIDGE_DIR/f"ready-name-{folder.encode('utf-8').hex()}.json")
+    for ready in candidates:
+        try:
+            info=json.loads(ready.read_text(encoding="utf-8"))
+            if now-info.get("at",0)/1000<8:return info
+        except Exception:pass
+    return {}
 
 def workspace_db(path):
     storage=Path.home()/".config/Code/User/workspaceStorage"
@@ -306,7 +337,11 @@ def scan():
         workspace_id=state.get("codexSwitch.activeProfileId.default"); profile=by_id.get(workspace_id or global_id,{})
         if " [SSH:" in name:status,completed,session_account=remote_session_status(path)
         else:status,completed,session_account=session_status(path,ps,sessions) if path else ("状态未知",0,None)
-        out.append(dict(id=wid,pid=pid,title=title,folder=name,path=path,account=session_account or profile.get("name","未知账号"),account_scope="最近请求" if session_account else ("工作区" if workspace_id else "插件当前"),status=status,completed=completed))
+        bridge_info=bridge_window_info(path,name); provider=bridge_info.get("provider","subscription")
+        provider_profile=api_profile_for(provider)
+        account=provider_profile.get("name",provider) if provider!="subscription" else (session_account or profile.get("name","未知账号"))
+        scope="API 服务商" if provider!="subscription" else ("最近请求" if session_account else ("工作区" if workspace_id else "插件当前"))
+        out.append(dict(id=wid,pid=pid,title=title,folder=name,path=path,account=account,account_scope=scope,status=status,completed=completed,provider=provider))
     return out
 
 def active_window_id():
@@ -649,7 +684,13 @@ class App(QWidget):
                 if remaining is None or remaining>0:available.append(profile)
             for profile in available:
                 remaining=(profile.get("limits",{}).get("primary") or {}).get("remainingPercent"); action=menu.addAction(("✓  " if profile.get("name")==selected_name else "    ")+f"{profile.get('name','未命名')}    {remaining if remaining is not None else '--'}%"); action.triggered.connect(lambda _,x=w,p=profile:self.select_account(x,p))
-            if not available:disabled=menu.addAction("暂无可用额度账号"); disabled.setEnabled(False)
+            api_profiles=api_provider_profiles()
+            if available and api_profiles:menu.addSeparator()
+            for api_profile in api_profiles:
+                api_action=menu.addAction(("✓  " if api_profile.get("name")==selected_name else "    ")+f"{api_profile.get('name')}    按量计费")
+                api_action.setEnabled(api_profile.get("configured",False)); api_action.setToolTip("手动选择的独立 API 接口，不会自动接管 Plus")
+                api_action.triggered.connect(lambda _,x=w,p=api_profile:self.select_account(x,p))
+            if not available and not any(p.get("configured") for p in api_profiles):disabled=menu.addAction("暂无可用账号"); disabled.setEnabled(False)
             selector.setMenu(menu); selector.setToolTip("先选择账号，再点聚焦应用切换"); h.addWidget(selector)
             ideas=QPushButton(f"灵感 {len(open_ideas)}" if open_ideas else "记灵感"); ideas.setToolTip("记录和管理这个项目暂未实现的想法"); ideas.setStyleSheet("background:#f5f3ff;color:#6d28d9;border:1px solid #ddd6fe"); ideas.clicked.connect(lambda _,x=w:self.open_project_ideas(x)); h.addWidget(ideas)
             create=QPushButton("加待办"); create.setToolTip("把这个项目加入今日待办"); create.clicked.connect(lambda _,x=w:self.prefill_todo(x)); h.addWidget(create)
@@ -658,7 +699,7 @@ class App(QWidget):
     def open_project_ideas(self,window):
         dialog=ProjectIdeasDialog(self.idea_store,window,self); dialog.exec() if hasattr(dialog,"exec") else dialog.exec_(); self.refresh()
     def account_panel(self):
-        rows=profiles(); p=QFrame(); p.setObjectName("accountPanel"); p.setStyleSheet("QFrame#accountPanel{background:#f7fcfa;border:1px solid #dbeee7;border-radius:11px} QLabel{background:transparent}"); v=QVBoxLayout(p); v.setContentsMargins(13,10,13,12); v.setSpacing(7); head=QHBoxLayout(); heading=QLabel("账号额度"); heading.setFont(QFont("Noto Sans CJK SC",14,QFont.Bold)); heading.setStyleSheet("color:#0f172a"); head.addWidget(heading); subtitle=QLabel("自动读取 Codex Switch"); subtitle.setStyleSheet("color:#64748b;font-size:10px"); head.addWidget(subtitle); head.addStretch(); count=QLabel(f"{len(rows)} 个账号"); count.setStyleSheet("color:#047857;background:#ecfdf5;padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700"); head.addWidget(count); v.addLayout(head); h=QHBoxLayout(); h.setSpacing(7)
+        rows=profiles(); api_profiles=api_provider_profiles(); api_ready=sum(p.get("configured",False) for p in api_profiles); p=QFrame(); p.setObjectName("accountPanel"); p.setStyleSheet("QFrame#accountPanel{background:#f7fcfa;border:1px solid #dbeee7;border-radius:11px} QLabel{background:transparent}"); v=QVBoxLayout(p); v.setContentsMargins(13,10,13,12); v.setSpacing(7); head=QHBoxLayout(); heading=QLabel("账号额度"); heading.setFont(QFont("Noto Sans CJK SC",14,QFont.Bold)); heading.setStyleSheet("color:#0f172a"); head.addWidget(heading); subtitle=QLabel("自动读取 Codex Switch"); subtitle.setStyleSheet("color:#64748b;font-size:10px"); head.addWidget(subtitle); head.addStretch(); count=QLabel(f"{len(rows)} 个 Plus · {api_ready} 个 API 备用"); count.setStyleSheet("color:#047857;background:#ecfdf5;padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700"); head.addWidget(count); v.addLayout(head); h=QHBoxLayout(); h.setSpacing(7)
         for profile in rows:
             limits=profile.get("limits",{}); primary=limits.get("primary") or {}; secondary=limits.get("secondary") or {}
             card=QFrame(); card.setObjectName("quotaCard"); card.setStyleSheet("QFrame#quotaCard{background:white;border:1px solid #dbe7e2;border-radius:8px} QLabel{background:transparent}"); c=QVBoxLayout(card); c.setContentsMargins(9,7,9,8); c.setSpacing(3); name_row=QHBoxLayout(); name=QLabel(profile.get("name","未命名")); name.setFont(QFont("Noto Sans CJK SC",11,QFont.Bold)); name.setStyleSheet("color:#0f172a"); name_row.addWidget(name,1); windows_count=sum(bool(window) for window in (primary,secondary)); window_badge=QLabel(f"{windows_count} 个额度周期"); window_badge.setStyleSheet("color:#64748b;background:#f1f5f9;padding:2px 5px;border-radius:4px;font-size:8px"); name_row.addWidget(window_badge); c.addLayout(name_row)
@@ -1118,7 +1159,7 @@ class App(QWidget):
         if profile.get("name")==w.get("account"):self.pending_accounts.pop(w["path"],None)
         else:self.pending_accounts[w["path"]]=profile
         self.refresh()
-    def bridge_ready(self,w):
+    def bridge_ready(self,w,provider_switch=False):
         now=time.time(); candidates=[BRIDGE_DIR/f"ready-{w['path'].encode('utf-8').hex()}.json",BRIDGE_DIR/f"ready-name-{w['folder'].encode('utf-8').hex()}.json"]
         candidates.extend(BRIDGE_DIR.glob("ready-active-*.json"))
         for ready in candidates:
@@ -1128,20 +1169,23 @@ class App(QWidget):
                 if ready.name.startswith("ready-active-"):
                     active=info.get("activeFile","")
                     if not active or not (active==w["path"] or active.startswith(w["path"].rstrip("/")+"/")):continue
+                if provider_switch and info.get("bridgeVersion")!="0.1.2":continue
                 return True
             except Exception:pass
         return False
     def switch_account(self,w,profile,focus_after=False):
         if not profile:return
-        if not self.bridge_ready(w):
-            self.recover_bridge_then_switch(w,profile,focus_after)
+        provider_switch=profile.get("kind")=="api" or w.get("provider")=="hejuapi"
+        if not self.bridge_ready(w,provider_switch):
+            self.recover_bridge_then_switch(w,profile,focus_after,provider_switch)
             return
         request_id=str(uuid.uuid4()); requests=BRIDGE_DIR/"requests"; requests.mkdir(parents=True,exist_ok=True)
-        payload={"id":request_id,"targetPath":w["path"],"profileId":profile["id"],"profileName":profile.get("name","未命名")}
+        if profile.get("kind")=="api":payload={"id":request_id,"action":"switchProvider","provider":profile.get("provider","hejuapi"),"codexHome":profile.get("codexHome",str(API_CODEX_HOME)),"targetPath":w["path"],"profileName":profile.get("name","备用 API")}
+        else:payload={"id":request_id,"action":"switchAccount","provider":"subscription","targetPath":w["path"],"profileId":profile["id"],"profileName":profile.get("name","未命名")}
         (requests/f"{request_id}.json").write_text(json.dumps(payload,ensure_ascii=False),encoding="utf-8")
         self.pending_focus[request_id]=(w["id"],w["path"],profile.get("name","未命名"),0)
         self.pending_accounts.pop(w["path"],None); self.collapse(); subprocess.run(["wmctrl","-i","-a",w["id"]]); QTimer.singleShot(500,lambda rid=request_id:self.wait_switch_result(rid))
-    def recover_bridge_then_switch(self,w,profile,focus_after=False):
+    def recover_bridge_then_switch(self,w,profile,focus_after=False,provider_switch=False):
         path=w.get("path","")
         if not path:return
         if path in self.pending_bridge_recovery:return
@@ -1149,14 +1193,14 @@ class App(QWidget):
         if not installed:
             QMessageBox.warning(self,"桥接修复失败",f"无法修复 VS Code 桥接：{error}")
             return
-        self.pending_bridge_recovery[path]=(dict(w),profile,focus_after,0)
+        self.pending_bridge_recovery[path]=(dict(w),profile,focus_after,provider_switch,0)
         self.collapse()
         QTimer.singleShot(600,lambda p=path:self.wait_bridge_recovery(p))
     def wait_bridge_recovery(self,path):
         pending=self.pending_bridge_recovery.get(path)
         if not pending:return
-        w,profile,focus_after,attempt=pending
-        if self.bridge_ready(w):
+        w,profile,focus_after,provider_switch,attempt=pending
+        if self.bridge_ready(w,provider_switch):
             self.pending_bridge_recovery.pop(path,None)
             self.switch_account(w,profile,focus_after)
             return
@@ -1164,7 +1208,7 @@ class App(QWidget):
             self.pending_bridge_recovery.pop(path,None)
             QMessageBox.warning(self,"桥接恢复超时","桥接已重新安装，但目标 VS Code 窗口未在预期时间内响应。请在窗口完全打开后再点一次“切换并聚焦”。")
             return
-        self.pending_bridge_recovery[path]=(w,profile,focus_after,attempt+1)
+        self.pending_bridge_recovery[path]=(w,profile,focus_after,provider_switch,attempt+1)
         QTimer.singleShot(500,lambda p=path:self.wait_bridge_recovery(p))
     def open_conversation(self,w,conversation):
         if not self.bridge_ready(w):

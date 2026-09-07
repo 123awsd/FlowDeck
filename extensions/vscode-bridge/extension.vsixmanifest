@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
   <Metadata>
-    <Identity Language="en-US" Id="codex-window-bridge" Version="0.1.1" Publisher="local" />
+    <Identity Language="en-US" Id="codex-window-bridge" Version="0.1.2" Publisher="local" />
     <DisplayName>Codex Window Bridge</DisplayName>
     <Description xml:space="preserve">Receives local account-switch requests from Codex Control Tower.</Description>
     <Tags>codex,account,window</Tags>

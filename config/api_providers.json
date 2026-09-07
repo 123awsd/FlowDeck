@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "providers": [
+    {
+      "id": "hejuapi",
+      "name": "备用 API",
+      "base_url": "https://www.hejuapi.com/v1",
+      "codex_home": "~/.codex-heju",
+      "auth": "api_key",
+      "configured": true
+    }
+  ]
+}
