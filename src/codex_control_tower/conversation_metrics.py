@@ -45,6 +45,7 @@ def session_metrics(path):
     except (OSError, ValueError):
         pass
     info = None
+    turn_usage = None
     turn_started_at = turn_completed_at = 0.0
     try:
         for raw in reversed(_tail_lines(path)):
@@ -53,13 +54,15 @@ def session_metrics(path):
             except (ValueError, UnicodeDecodeError):
                 continue
             payload_type = payload.get("type")
+            if turn_usage is None and record.get("type") == "token_usage_record" and isinstance(payload.get("turn_token_usage"), dict):
+                turn_usage = payload["turn_token_usage"]
             if info is None and payload_type == "token_count" and isinstance(payload.get("info"), dict):
                 info = payload["info"]
             if not turn_started_at and payload_type == "task_started":
                 turn_started_at = _timestamp(record.get("timestamp"))
             if not turn_completed_at and payload_type == "task_complete":
                 turn_completed_at = _timestamp(record.get("timestamp"))
-            if info is not None and turn_started_at and turn_completed_at:
+            if info is not None and turn_usage is not None and turn_started_at and turn_completed_at:
                 break
     except OSError:
         pass
@@ -76,6 +79,7 @@ def session_metrics(path):
         "turn_running": bool(turn_started_at and turn_started_at > turn_completed_at),
         "total": total,
         "last": last,
+        "turn": dict(turn_usage or last),
         "context_window": context_window,
         "context_tokens": context_tokens,
         "context_percent": min(100, round(context_tokens / context_window * 100)) if context_window else None,

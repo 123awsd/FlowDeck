@@ -80,11 +80,13 @@ def discover_controller():
     return None
 
 
-def controller_json(path, timeout=2):
+def controller_request(path, method="GET", payload=None, timeout=2):
     controller = discover_controller()
     if not controller:
         raise ConnectionError("未发现 Mihomo 控制接口")
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json"}; body = None
+    if payload is not None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8"); headers["Content-Type"] = "application/json"
     if controller.get("secret"):
         headers["Authorization"] = "Bearer " + controller["secret"]
     if controller["kind"] == "unix":
@@ -92,12 +94,16 @@ def controller_json(path, timeout=2):
     else:
         connection = http.client.HTTPConnection(controller["address"], timeout=timeout)
     try:
-        connection.request("GET", path, headers=headers); response = connection.getresponse(); body = response.read()
+        connection.request(method, path, body=body, headers=headers); response = connection.getresponse(); response_body = response.read()
         if response.status >= 400:
             raise ConnectionError(f"Mihomo 控制接口返回 HTTP {response.status}")
-        return json.loads(body or b"{}")
+        return json.loads(response_body or b"{}")
     finally:
         connection.close()
+
+
+def controller_json(path, timeout=2):
+    return controller_request(path, timeout=timeout)
 
 
 def mihomo_snapshot():
@@ -198,26 +204,55 @@ def benchmark_current_route(attempts=3):
     _RESULT_CACHE["speed"] = (time.monotonic(), result); return result
 
 
-def recommend_nodes(limit=4):
-    cached = _RESULT_CACHE.get("recommend")
+def _selector_group(proxies, service):
+    hints = ("AI网站", "AI") if service == "Codex" else ("节点选择", "Proxy", "代理")
+    for hint in hints:
+        match = next(((name, value) for name, value in proxies.items() if hint.lower() in name.lower() and value.get("type") == "Selector" and value.get("all")), None)
+        if match:return match
+    match = next(((name, value) for name, value in proxies.items() if value.get("type") == "Selector" and value.get("all") and name != "GLOBAL"), None)
+    return match or (None, None)
+
+
+def _group_leaves(proxies, group, seen=None):
+    seen = set(seen or ())
+    if group in seen:return []
+    seen.add(group); value = proxies.get(group) or {}
+    if value.get("type") not in ("Selector", "URLTest", "Fallback", "LoadBalance"):
+        return [] if value.get("alive") is False or group in ("DIRECT", "REJECT") else [group]
+    rows = []
+    for child in value.get("all") or []:rows.extend(_group_leaves(proxies, child, seen))
+    return list(dict.fromkeys(rows))
+
+
+def recommend_nodes(services=None, limit=12):
+    services = tuple(services or ("Codex", "GitHub", "Hugging Face")); cache_key = "recommend:" + ",".join(services)
+    cached = _RESULT_CACHE.get(cache_key)
     if cached and time.monotonic() - cached[0] < 600:
         return {**cached[1], "_cached": True}
     proxies = controller_json("/proxies", 2).get("proxies", {})
-    leaves = []
-    for name, value in proxies.items():
-        if value.get("type") in ("Selector", "URLTest", "Fallback", "LoadBalance", "Direct", "Reject", "Compatible") or value.get("alive") is False:
-            continue
-        history = value.get("history") or []; delay = next((item.get("delay") for item in reversed(history) if item.get("delay")), 99999)
-        leaves.append((delay, name))
-    names = [name for _, name in sorted(leaves)[:limit]]
     targets = {"Codex": "https://api.openai.com", "GitHub": "https://github.com", "Hugging Face": "https://huggingface.co"}
-    jobs = [(service, node, url) for service, url in targets.items() for node in names]
+    jobs = []
+    for service in services:
+        group_name, group = _selector_group(proxies, service)
+        leaves = []
+        for name in _group_leaves(proxies, group_name):
+            value = proxies.get(name) or {}; history = value.get("history") or []; delay = next((item.get("delay") for item in reversed(history) if item.get("delay")), 99999); leaves.append((delay, name))
+        for _, node in sorted(leaves)[:limit]:jobs.append((service, group_name, node, targets[service]))
     def test(job):
-        service, node, url = job; path = "/proxies/" + urllib.parse.quote(node, safe="") + "/delay?" + urllib.parse.urlencode({"url": url, "timeout": 3000})
-        try:return service, node, int(controller_json(path, 5).get("delay") or 0)
-        except Exception:return service, node, 0
+        service, group, node, url = job; path = "/proxies/" + urllib.parse.quote(node, safe="") + "/delay?" + urllib.parse.urlencode({"url": url, "timeout": 3000})
+        try:return service, group, node, int(controller_json(path, 5).get("delay") or 0)
+        except Exception:return service, group, node, 0
     result = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(12, len(jobs) or 1)) as executor:
-        for service, node, delay in executor.map(test, jobs):
-            if delay and (service not in result or delay < result[service]["delay"]):result[service] = {"node": node, "delay": delay}
-    _RESULT_CACHE["recommend"] = (time.monotonic(), result); return result
+        for service, group, node, delay in executor.map(test, jobs):
+            if delay and (service not in result or delay < result[service]["delay"]):result[service] = {"group": group, "node": node, "delay": delay}
+    _RESULT_CACHE[cache_key] = (time.monotonic(), result); return result
+
+
+def switch_fastest(service):
+    result = recommend_nodes((service,)); choice = result.get(service)
+    if not choice:raise ConnectionError(f"没有找到适合 {service} 的可用节点")
+    path = "/proxies/" + urllib.parse.quote(choice["group"], safe="")
+    controller_request(path, method="PUT", payload={"name": choice["node"]}, timeout=3)
+    _RESULT_CACHE.clear()
+    return {"service": service, **choice}

@@ -13,12 +13,14 @@ class ConversationMetricsTests(unittest.TestCase):
             rows = [
                 {"timestamp": "2026-09-08T01:00:00Z", "type": "session_meta", "payload": {"cwd": "/tmp/project"}},
                 {"timestamp": "2026-09-08T01:01:00Z", "type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": 1000, "cached_input_tokens": 600, "output_tokens": 100, "reasoning_output_tokens": 20, "total_tokens": 1100}, "last_token_usage": {"input_tokens": 500, "cached_input_tokens": 300, "output_tokens": 50, "total_tokens": 550}, "model_context_window": 2000}}},
+                {"timestamp": "2026-09-08T01:01:01Z", "type": "token_usage_record", "payload": {"turn_token_usage": {"input_tokens": 900, "cached_input_tokens": 500, "output_tokens": 180, "total_tokens": 1080}}},
             ]
             path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
             result = session_metrics(path)
             self.assertEqual(result["context_percent"], 25)
             self.assertEqual(result["cache_percent"], 60)
             self.assertEqual(result["last"]["total_tokens"], 550)
+            self.assertEqual(result["turn"]["output_tokens"], 180)
 
     def test_compact_token_labels(self):
         self.assertEqual(compact_tokens(1200), "1.2K")
