@@ -467,7 +467,7 @@ class SpeechCard(QFrame):
 class SelectionBubble(QDialog):
     """Compact global translate/explain result attached to the floating tower."""
     def __init__(self,parent,mode,text,executor):
-        super().__init__(parent); self.mode=mode; self.source=text; self.executor=executor; self.future=None; self.audio_cancel=None
+        super().__init__(parent); self.mode=mode; self.source=text; self.executor=executor; self.future=None; self.audio_cancel=None; self.dismiss_armed=False
         self.setWindowFlag(Qt.FramelessWindowHint,True); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setWindowFlag(Qt.Tool,True)
         self.setAttribute(Qt.WA_TranslucentBackground,True); self.setFixedWidth(442); self.setMinimumHeight(190); self.setMaximumHeight(520)
         outer=QVBoxLayout(self); outer.setContentsMargins(12,12,12,12)
@@ -484,6 +484,13 @@ class SelectionBubble(QDialog):
             self.future=executor.submit(request_deepseek,mode,text); QTimer.singleShot(80,self.poll)
             if mode=="translate":QTimer.singleShot(80,self.replay)
         else:QTimer.singleShot(2600,self.close)
+        # Qt5 does not reliably emit focusOutEvent for a frameless Qt.Tool when
+        # another application receives the click. Polling the application focus
+        # after a short grace period covers both in-app and cross-app clicks.
+        self.dismiss_timer=QTimer(self); self.dismiss_timer.setInterval(120); self.dismiss_timer.timeout.connect(self.check_dismiss); self.dismiss_timer.start(); QTimer.singleShot(550,self.arm_dismiss)
+    def arm_dismiss(self):self.dismiss_armed=True
+    def check_dismiss(self):
+        if self.dismiss_armed and QApplication.activeWindow() is not self:self.close()
     def poll(self):
         if not self.future:return
         if not self.future.done():QTimer.singleShot(80,self.poll); return
@@ -500,7 +507,7 @@ class SelectionBubble(QDialog):
         if event.key()==Qt.Key_Escape:self.close(); return
         super().keyPressEvent(event)
     def focusOutEvent(self,event):
-        QTimer.singleShot(180,lambda:self.close() if not self.isActiveWindow() else None)
+        if self.dismiss_armed:QTimer.singleShot(120,lambda:self.close() if not self.isActiveWindow() else None)
         super().focusOutEvent(event)
     def closeEvent(self,event):
         if self.audio_cancel:self.audio_cancel.set()
