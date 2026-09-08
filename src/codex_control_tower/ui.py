@@ -22,11 +22,11 @@ from .vocabulary import VocabularyLibrary, VocabularyStore
 from .vscode_bridge import ensure_bridge_installed
 try:
     from PySide6.QtCore import Qt, QTimer, QEvent, QPoint, QSize
-    from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPen, QPixmap, QShortcut
+    from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QShortcut
     from PySide6.QtWidgets import *
 except ImportError:
     from PyQt5.QtCore import Qt, QTimer, QEvent, QPoint, QSize
-    from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPen, QPixmap
+    from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
     from PyQt5.QtWidgets import *
 
 BASE=PROJECT_ROOT; DATA=DATA_DIR/"tasks.json"; TODOS_FILE=DATA_DIR/"daily_todos.json"; EVENTS=DATA_DIR/"events.jsonl"
@@ -446,21 +446,40 @@ class DraggableHeader(QFrame):
         if event.button()==Qt.LeftButton:self.window().toggle_maximize(); event.accept(); return
         super().mouseDoubleClickEvent(event)
 
+class SpeechCard(QFrame):
+    """Rounded chat surface with a pointer aimed at the floating bubble."""
+    def __init__(self,parent=None):
+        super().__init__(parent); self.pointer_side="left"; self.setAttribute(Qt.WA_TranslucentBackground,True)
+    def set_pointer_side(self,side):
+        self.pointer_side=side; self.layout().setContentsMargins(22 if side=="left" else 14,13,22 if side=="right" else 14,14); self.update()
+    def paintEvent(self,event):
+        painter=QPainter(self); painter.setRenderHint(QPainter.Antialiasing); path=QPainterPath(); inset=9
+        body=self.rect().adjusted(inset if self.pointer_side=="left" else 0,0,-inset if self.pointer_side=="right" else 0,0)
+        path.addRoundedRect(float(body.x()),float(body.y()),float(body.width()),float(body.height()),18.0,18.0); middle=max(body.top()+27,min(body.bottom()-27,36))
+        pointer=QPainterPath()
+        if self.pointer_side=="left":
+            pointer.moveTo(body.left()+1,middle-8); pointer.lineTo(1,middle); pointer.lineTo(body.left()+1,middle+8)
+        else:
+            pointer.moveTo(body.right()-1,middle-8); pointer.lineTo(self.width()-1,middle); pointer.lineTo(body.right()-1,middle+8)
+        pointer.closeSubpath(); path.addPath(pointer)
+        painter.setPen(QPen(QColor("#ddd6ee"),1)); painter.setBrush(QColor("#fffefa")); painter.drawPath(path); painter.end()
+
 class SelectionBubble(QDialog):
     """Compact global translate/explain result attached to the floating tower."""
     def __init__(self,parent,mode,text,executor):
         super().__init__(parent); self.mode=mode; self.source=text; self.executor=executor; self.future=None; self.audio_cancel=None
         self.setWindowFlag(Qt.FramelessWindowHint,True); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setWindowFlag(Qt.Tool,True)
-        self.setAttribute(Qt.WA_TranslucentBackground,True); self.setFixedWidth(430); self.setMinimumHeight(190); self.setMaximumHeight(520)
+        self.setAttribute(Qt.WA_TranslucentBackground,True); self.setFixedWidth(442); self.setMinimumHeight(190); self.setMaximumHeight(520)
         outer=QVBoxLayout(self); outer.setContentsMargins(12,12,12,12)
-        card=QFrame(); card.setObjectName("selectionCard"); card.setStyleSheet("QFrame#selectionCard{background:#fffefa;border:1px solid #ddd6fe;border-radius:18px} QLabel{background:transparent;border:0}")
+        card=SpeechCard(); self.card=card; card.setObjectName("selectionCard"); card.setStyleSheet("QFrame#selectionCard{background:transparent;border:0} QLabel{background:transparent;border:0}")
         shadow=QGraphicsDropShadowEffect(card); shadow.setBlurRadius(28); shadow.setOffset(0,7); shadow.setColor(QColor(56,45,90,65)); card.setGraphicsEffect(shadow)
-        layout=QVBoxLayout(card); layout.setContentsMargins(16,13,16,14); layout.setSpacing(9)
-        head=QHBoxLayout(); icon=QLabel("✦"); icon.setStyleSheet("color:#8f7bc2;font-size:18px;font-weight:700"); head.addWidget(icon); title=QLabel("快捷翻译" if mode=="translate" else "快捷解释"); title.setStyleSheet("color:#4c416f;font-size:14px;font-weight:700"); head.addWidget(title); head.addStretch(); hint=QLabel("Alt+Q" if mode=="translate" else "Alt+E"); hint.setStyleSheet("color:#8b7fa8;background:#f1edfb;padding:3px 7px;border-radius:7px;font-size:9px"); head.addWidget(hint); close=QPushButton("×"); close.setFixedSize(28,28); close.setStyleSheet("QPushButton{padding:0;border:0;background:transparent;color:#8b8498;font-size:17px} QPushButton:hover{background:#f4effb}"); close.clicked.connect(self.close); head.addWidget(close); layout.addLayout(head)
-        source_label=QLabel(text if text else "请先选中一个名词或一段文字"); source_label.setWordWrap(True); source_label.setTextInteractionFlags(Qt.TextSelectableByMouse); source_label.setMaximumHeight(82); source_label.setStyleSheet("color:#6f6781;background:#f8f5ff;padding:9px 11px;border-radius:10px;font-size:10px"); layout.addWidget(source_label)
+        layout=QVBoxLayout(card); layout.setContentsMargins(22,13,14,14); layout.setSpacing(9)
+        head=QHBoxLayout(); avatar=QLabel("✦"); avatar.setAlignment(Qt.AlignCenter); avatar.setFixedSize(28,28); avatar.setStyleSheet("color:white;background:#9a87c8;border-radius:14px;font-size:15px;font-weight:700"); head.addWidget(avatar); titles=QVBoxLayout(); titles.setSpacing(0); title=QLabel("快捷翻译" if mode=="translate" else "快捷解释"); title.setStyleSheet("color:#4c416f;font-size:13px;font-weight:700"); titles.addWidget(title); sub=QLabel("来自当前选中内容"); sub.setStyleSheet("color:#9a91aa;font-size:9px"); titles.addWidget(sub); head.addLayout(titles); head.addStretch(); hint=QLabel("Alt+Q" if mode=="translate" else "Alt+E"); hint.setStyleSheet("color:#81749d;background:#f2eefb;padding:3px 7px;border-radius:7px;font-size:9px"); head.addWidget(hint); close=QPushButton("×"); close.setFixedSize(28,28); close.setToolTip("关闭"); close.setStyleSheet("QPushButton{padding:0;border:0;background:transparent;color:#9a91aa;font-size:17px} QPushButton:hover{background:#f4effb;color:#65567f;border-radius:14px}"); close.clicked.connect(self.close); head.addWidget(close); layout.addLayout(head)
+        source_label=QLabel(text if text else "请先选中一个名词或一段文字"); source_label.setWordWrap(True); source_label.setTextInteractionFlags(Qt.TextSelectableByMouse); source_label.setMaximumHeight(82); source_label.setStyleSheet("color:#716881;background:#f7f3fd;padding:9px 11px;border-radius:11px;font-size:10px"); layout.addWidget(source_label)
         answer_scroll=QScrollArea(); answer_scroll.setWidgetResizable(True); answer_scroll.setFrameShape(QFrame.NoFrame); answer_scroll.setMinimumHeight(58); answer_scroll.setMaximumHeight(300); answer_scroll.setStyleSheet("QScrollArea{background:white;border:1px solid #eee8f5;border-radius:11px} QScrollArea QWidget#qt_scrollarea_viewport{background:white}")
         self.answer=QLabel("正在翻译…" if mode=="translate" else "正在理解这个概念…"); self.answer.setWordWrap(True); self.answer.setAlignment(Qt.AlignLeft|Qt.AlignTop); self.answer.setTextInteractionFlags(Qt.TextSelectableByMouse); self.answer.setContentsMargins(11,10,11,10); self.answer.setStyleSheet("color:#303648;background:white;border:0;font-size:12px"); answer_scroll.setWidget(self.answer); layout.addWidget(answer_scroll,1)
-        actions=QHBoxLayout(); actions.addStretch(); self.speak=QPushButton("🔊 朗读"); self.speak.clicked.connect(self.replay); actions.addWidget(self.speak); copy=QPushButton("复制结果"); copy.clicked.connect(self.copy_result); actions.addWidget(copy); layout.addLayout(actions); outer.addWidget(card)
+        actions=QHBoxLayout(); actions.setSpacing(7); tip=QLabel("选中文字可直接复制"); tip.setStyleSheet("color:#aaa2b5;font-size:9px"); actions.addWidget(tip); actions.addStretch(); action_style="QPushButton{padding:6px 11px;background:#f5f1fb;color:#685a82;border:1px solid #e5dcf2;border-radius:12px;font-size:10px;font-weight:600} QPushButton:hover{background:#ebe4f7;border-color:#d4c6e8;color:#504268} QPushButton:pressed{background:#dfd5ef}"
+        self.speak=QPushButton("♫  朗读"); self.speak.setToolTip("重新朗读选中的英文"); self.speak.setStyleSheet(action_style); self.speak.clicked.connect(self.replay); actions.addWidget(self.speak); copy=QPushButton("▣  复制"); copy.setToolTip("复制 AI 结果"); copy.setStyleSheet(action_style); copy.clicked.connect(self.copy_result); actions.addWidget(copy); layout.addLayout(actions); outer.addWidget(card)
         if text:
             self.future=executor.submit(request_deepseek,mode,text); QTimer.singleShot(80,self.poll)
             if mode=="translate":QTimer.singleShot(80,self.replay)
@@ -695,7 +714,9 @@ class App(QWidget):
         self.selection_popup=SelectionBubble(None,mode,text,self.selection_executor)
         screen=QApplication.screenAt(self.frameGeometry().center()) or QApplication.primaryScreen(); available=screen.availableGeometry(); anchor=self.frameGeometry(); popup=self.selection_popup
         popup.adjustSize(); x=anchor.right()+8
-        if x+popup.width()>available.right():x=anchor.left()-popup.width()-8
+        pointer_side="left"
+        if x+popup.width()>available.right():x=anchor.left()-popup.width()-8; pointer_side="right"
+        popup.card.set_pointer_side(pointer_side)
         x=max(available.left()+8,min(x,available.right()-popup.width()-8)); y=max(available.top()+8,min(anchor.center().y()-popup.height()//2,available.bottom()-popup.height()-8))
         popup.move(x,y); popup.show(); popup.raise_(); popup.activateWindow()
     def expand(self):
