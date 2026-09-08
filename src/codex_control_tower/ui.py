@@ -15,6 +15,7 @@ from .network_diagnostics import benchmark_current_route, diagnose_network, disp
 from .paths import ASSETS_DIR, DATA_DIR, PROJECT_ROOT
 from .project_ideas import ProjectIdeaStore
 from .provider_routing import assert_independent_provider_home, ensure_provider_routing_patch
+from .selection_assistant import SOCKET_PATH, create_receiver, receive_requests, request_deepseek
 from .system_monitor import SystemMonitor
 from .theme import CANVAS, PAGE, SURFACE, app_stylesheet, badge_style, button_style, dialog_stylesheet, panel_style
 from .vocabulary import VocabularyLibrary, VocabularyStore
@@ -445,6 +446,47 @@ class DraggableHeader(QFrame):
         if event.button()==Qt.LeftButton:self.window().toggle_maximize(); event.accept(); return
         super().mouseDoubleClickEvent(event)
 
+class SelectionBubble(QDialog):
+    """Compact global translate/explain result attached to the floating tower."""
+    def __init__(self,parent,mode,text,executor):
+        super().__init__(parent); self.mode=mode; self.source=text; self.executor=executor; self.future=None; self.audio_cancel=None
+        self.setWindowFlag(Qt.FramelessWindowHint,True); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setWindowFlag(Qt.Tool,True)
+        self.setAttribute(Qt.WA_TranslucentBackground,True); self.setFixedWidth(430); self.setMinimumHeight(190); self.setMaximumHeight(520)
+        outer=QVBoxLayout(self); outer.setContentsMargins(12,12,12,12)
+        card=QFrame(); card.setObjectName("selectionCard"); card.setStyleSheet("QFrame#selectionCard{background:#fffefa;border:1px solid #ddd6fe;border-radius:18px} QLabel{background:transparent;border:0}")
+        shadow=QGraphicsDropShadowEffect(card); shadow.setBlurRadius(28); shadow.setOffset(0,7); shadow.setColor(QColor(56,45,90,65)); card.setGraphicsEffect(shadow)
+        layout=QVBoxLayout(card); layout.setContentsMargins(16,13,16,14); layout.setSpacing(9)
+        head=QHBoxLayout(); icon=QLabel("✦"); icon.setStyleSheet("color:#8f7bc2;font-size:18px;font-weight:700"); head.addWidget(icon); title=QLabel("快捷翻译" if mode=="translate" else "快捷解释"); title.setStyleSheet("color:#4c416f;font-size:14px;font-weight:700"); head.addWidget(title); head.addStretch(); hint=QLabel("Alt+Q" if mode=="translate" else "Alt+E"); hint.setStyleSheet("color:#8b7fa8;background:#f1edfb;padding:3px 7px;border-radius:7px;font-size:9px"); head.addWidget(hint); close=QPushButton("×"); close.setFixedSize(28,28); close.setStyleSheet("QPushButton{padding:0;border:0;background:transparent;color:#8b8498;font-size:17px} QPushButton:hover{background:#f4effb}"); close.clicked.connect(self.close); head.addWidget(close); layout.addLayout(head)
+        source_label=QLabel(text if text else "请先选中一个名词或一段文字"); source_label.setWordWrap(True); source_label.setTextInteractionFlags(Qt.TextSelectableByMouse); source_label.setMaximumHeight(82); source_label.setStyleSheet("color:#6f6781;background:#f8f5ff;padding:9px 11px;border-radius:10px;font-size:10px"); layout.addWidget(source_label)
+        answer_scroll=QScrollArea(); answer_scroll.setWidgetResizable(True); answer_scroll.setFrameShape(QFrame.NoFrame); answer_scroll.setMinimumHeight(58); answer_scroll.setMaximumHeight(300); answer_scroll.setStyleSheet("QScrollArea{background:white;border:1px solid #eee8f5;border-radius:11px} QScrollArea QWidget#qt_scrollarea_viewport{background:white}")
+        self.answer=QLabel("正在翻译…" if mode=="translate" else "正在理解这个概念…"); self.answer.setWordWrap(True); self.answer.setAlignment(Qt.AlignLeft|Qt.AlignTop); self.answer.setTextInteractionFlags(Qt.TextSelectableByMouse); self.answer.setContentsMargins(11,10,11,10); self.answer.setStyleSheet("color:#303648;background:white;border:0;font-size:12px"); answer_scroll.setWidget(self.answer); layout.addWidget(answer_scroll,1)
+        actions=QHBoxLayout(); actions.addStretch(); self.speak=QPushButton("🔊 朗读"); self.speak.clicked.connect(self.replay); actions.addWidget(self.speak); copy=QPushButton("复制结果"); copy.clicked.connect(self.copy_result); actions.addWidget(copy); layout.addLayout(actions); outer.addWidget(card)
+        if text:
+            self.future=executor.submit(request_deepseek,mode,text); QTimer.singleShot(80,self.poll)
+            if mode=="translate":QTimer.singleShot(80,self.replay)
+        else:QTimer.singleShot(2600,self.close)
+    def poll(self):
+        if not self.future:return
+        if not self.future.done():QTimer.singleShot(80,self.poll); return
+        try:result=self.future.result()
+        except Exception as exc:result="这次没有处理成功："+str(exc)
+        self.answer.setText(result); self.future=None; self.adjustSize()
+    def copy_result(self):
+        QApplication.clipboard().setText(self.answer.text())
+    def replay(self):
+        if not self.source:return
+        if self.audio_cancel:self.audio_cancel.set()
+        self.audio_cancel=threading.Event(); self.executor.submit(play_vocab_audio,self.source,self.audio_cancel)
+    def keyPressEvent(self,event):
+        if event.key()==Qt.Key_Escape:self.close(); return
+        super().keyPressEvent(event)
+    def focusOutEvent(self,event):
+        QTimer.singleShot(180,lambda:self.close() if not self.isActiveWindow() else None)
+        super().focusOutEvent(event)
+    def closeEvent(self,event):
+        if self.audio_cancel:self.audio_cancel.set()
+        super().closeEvent(event)
+
 class LessonChatDialog(QDialog):
     """A lightweight, concept-scoped tutor using the existing DeepSeek key."""
     def __init__(self,parent,bundle,concept,lesson,store,executor):
@@ -601,6 +643,7 @@ class App(QWidget):
         self.lesson_store=LessonStore(); self.lesson_chat_store=LessonChatStore(); self.lesson_executor=ThreadPoolExecutor(max_workers=1); self.tutor_executor=ThreadPoolExecutor(max_workers=1); self.lesson_future=None; self.lesson_job=None; self.lesson_errors={}; self.curriculum_card_widget=None; self.tutor_dialogs=[]; self.floating_tutor_available=False
         self.vocab_library=VocabularyLibrary(); self.vocab_store=VocabularyStore(); vocabularies=self.vocab_library.lexicons(); self.vocab_lexicon_id=self.vocab_store.selected(vocabularies); selected_vocab=self.vocab_library.get(self.vocab_lexicon_id); self.vocab_words=self.vocab_library.load(selected_vocab["path"]) if selected_vocab else []; self.vocab_current_id=(self.vocab_store.due_words(self.vocab_words)[0]["id"] if self.vocab_words else None); self.vocab_revealed=False; self.vocab_random=False; self.vocab_history=[]; self.vocab_retry_queue=[]; self.vocab_last_spoken_id=None; self.vocab_audio_generation=0; self.tts_cancel=None; self.tts_executor=ThreadPoolExecutor(max_workers=3); self.tts_future=None
         self.system_monitor=SystemMonitor(); self.system_executor=ThreadPoolExecutor(max_workers=1); self.system_future=None; self.system_metrics=self.system_monitor.empty(); self.system_history={"cpu":deque(maxlen=60),"memory":deque(maxlen=60),"gpu":deque(maxlen=60),"disk":deque(maxlen=60)}
+        self.selection_executor=ThreadPoolExecutor(max_workers=3); self.selection_popup=None; self.selection_receiver=create_receiver()
         try:self.seen=json.loads(SEEN_FILE.read_text())
         except Exception:self.seen={}
         self.setWindowTitle("Codex 任务总控台"); self.setWindowIcon(QIcon(str(ASSETS_DIR/"codex-control-tower.svg"))); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setAttribute(Qt.WA_TranslucentBackground,True); self.setObjectName("root")
@@ -618,6 +661,7 @@ class App(QWidget):
             button=QPushButton(text); button.setFixedSize(32,30); button.setToolTip(tip); button.setStyleSheet("QPushButton{padding:0;background:transparent;border:0;border-radius:9px;font-size:16px;color:#667085} QPushButton:hover{background:#f1ece7}" if text!="×" else "QPushButton{padding:0;background:transparent;border:0;border-radius:9px;font-size:18px;color:#667085} QPushButton:hover{background:#fff0f1;color:#c96672}"); button.clicked.connect(fn); h.addWidget(button)
         shell_layout.addWidget(self.header); self.area=QScrollArea(); self.area.setWidgetResizable(True); self.area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); self.content=QWidget(); self.content.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred); self.box=QVBoxLayout(self.content); self.box.setSpacing(7); self.area.setWidget(self.content); shell_layout.addWidget(self.area); self.floating_tutor_button=QPushButton("问 AI",self.area.viewport()); self.floating_tutor_button.setFixedSize(72,36); self.floating_tutor_button.setCursor(Qt.PointingHandCursor); self.floating_tutor_button.setToolTip("随时围绕当前课程提问"); self.floating_tutor_button.setStyleSheet("QPushButton{background:#8f7bc2;color:white;border:1px solid #d8cef0;border-radius:18px;font-weight:700} QPushButton:hover{background:#75659e}"); tutor_shadow=QGraphicsDropShadowEffect(self.floating_tutor_button); tutor_shadow.setBlurRadius(14); tutor_shadow.setOffset(0,3); tutor_shadow.setColor(QColor(104,90,148,70)); self.floating_tutor_button.setGraphicsEffect(tutor_shadow); self.floating_tutor_button.clicked.connect(self.open_curriculum_tutor); self.floating_tutor_button.hide(); self.area.viewport().installEventFilter(self); self.root.addWidget(self.shell); self.setup_vocab_shortcuts(); ensure_bridge_installed(); self.refresh(); self.collapse()
         self.timer=QTimer(self); self.timer.timeout.connect(self.periodic_refresh); self.timer.start(5000); self.system_timer=QTimer(self); self.system_timer.timeout.connect(self.schedule_system_sample); self.system_timer.start(2000)
+        self.selection_timer=QTimer(self); self.selection_timer.timeout.connect(self.poll_selection_shortcuts); self.selection_timer.start(80)
     def load(self):
         try:return json.loads(DATA.read_text())
         except Exception:return []
@@ -642,6 +686,18 @@ class App(QWidget):
         if self.view_mode=="learn" and before!=after:self.refresh(render=True)
     def toggle(self):
         self.collapse() if self.expanded else self.expand()
+    def poll_selection_shortcuts(self):
+        for request in receive_requests(self.selection_receiver):self.show_selection_bubble(request["mode"],request["text"])
+    def show_selection_bubble(self,mode,text):
+        if self.selection_popup:self.selection_popup.close()
+        # Keep this as an independent tool window: showing a shortcut result
+        # must never expand or otherwise disturb the collapsed control tower.
+        self.selection_popup=SelectionBubble(None,mode,text,self.selection_executor)
+        screen=QApplication.screenAt(self.frameGeometry().center()) or QApplication.primaryScreen(); available=screen.availableGeometry(); anchor=self.frameGeometry(); popup=self.selection_popup
+        popup.adjustSize(); x=anchor.right()+8
+        if x+popup.width()>available.right():x=anchor.left()-popup.width()-8
+        x=max(available.left()+8,min(x,available.right()-popup.width()-8)); y=max(available.top()+8,min(anchor.center().y()-popup.height()//2,available.bottom()-popup.height()-8))
+        popup.move(x,y); popup.show(); popup.raise_(); popup.activateWindow()
     def expand(self):
         self.expanded=True; self.setWindowFlag(Qt.FramelessWindowHint,True); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setMinimumSize(740,420); self.setMaximumSize(16777215,16777215); self.root.setContentsMargins(6,6,6,6); self.bubble.hide(); self.shell.show(); self.area.show(); self.resize(840,540); self.show(); self.update_floating_tutor(); self.update_vocab_shortcuts()
         if self.view_mode=="learn" and self.learning_mode=="vocabulary":self.queue_vocab_autoplay(self.current_vocab_word())
@@ -1453,9 +1509,12 @@ class App(QWidget):
         if pending:self.switch_account(w,pending,True); return
         self.collapse(); subprocess.run(["wmctrl","-i","-a",wid]); QTimer.singleShot(250,self.ensure_on_top)
     def closeEvent(self,event):
-        self.timer.stop(); self.system_timer.stop()
+        self.timer.stop(); self.system_timer.stop(); self.selection_timer.stop()
         self.cancel_vocab_audio(True)
-        for executor in (self.feed_executor,self.system_executor,self.tts_executor):
+        if self.selection_popup:self.selection_popup.close()
+        try:self.selection_receiver.close(); SOCKET_PATH.unlink(missing_ok=True)
+        except OSError:pass
+        for executor in (self.feed_executor,self.system_executor,self.tts_executor,self.selection_executor):
             try:executor.shutdown(wait=False,cancel_futures=True)
             except TypeError:executor.shutdown(wait=False)
         event.accept()

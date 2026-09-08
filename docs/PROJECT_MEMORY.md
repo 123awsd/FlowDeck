@@ -23,6 +23,7 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 | 前沿追踪 | 已实现 | 具身智能宽召回、质量门槛、五通道推荐、视频、反馈和有界存储 | `src/codex_control_tower/learning_feed.py`、`config/learning_preferences.json`、`src/codex_control_tower/ui.py` |
 | 系统学习 | 已实现 | VLA reviewed draft、三条路线、审查门禁与实际微课正文；关键课内置，其余按需生成并缓存 | `src/codex_control_tower/curriculum.py`、`src/codex_control_tower/lessons.py`、`learning/domains/vla/` |
 | 单词闪卡 | 已实现 | 主动回忆、三档间隔复习、当日进度、朗读、收藏、自定义词库和猫猫反馈 | `src/codex_control_tower/vocabulary.py`、`learning/vocabulary/`、`assets/vocab-cats/` |
+| 快捷 AI 气泡 | 已实现 | Alt+Q 翻译、Alt+E 解释、Piper 朗读、复制与独立弹窗回退 | `src/codex_control_tower/selection_assistant.py`、`scripts/selection_shortcut.py`、`src/codex_control_tower/ui.py` |
 
 ## 稳定产品决定
 
@@ -113,3 +114,4 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 - 2026-09-08：视觉升级为“轻卡通工作台”：使用暖白表面、低饱和蓝/杏/紫/薄荷分区、细描边与柔和圆角，并加入本地透明值班猫猫素材；功能和信息结构保持不变，避免重阴影与高频动画影响常驻性能。
 - 2026-09-08：完成全应用视觉系统化：公共颜色、控件和弹窗规则收拢到 `theme.py`，顶部导航采用本地 SVG 图标和紧凑短标签，悬浮球使用猫猫与状态点，四个页面和主要弹窗统一暖白表面与低饱和层级；不得以页面内零散高饱和 QSS 重新破坏一致性。
 - 2026-09-08：用户更偏好原版悬浮球及其醒目提醒；折叠状态恢复蓝紫圆球与中心点阵，待查看时恢复红色整球和居中数字，展开后的轻卡通界面保持不变。
+- 2026-09-08：将原有 Alt+Q/Alt+E DeepSeek 选区工具接入悬浮生态；主程序以本机用户级 Socket 接收瞬时选区，在悬浮球旁显示翻译/解释聊天气泡，复用 Piper 自动朗读；不保存历史，主程序不在时回退旧弹窗。
