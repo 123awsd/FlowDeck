@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 _CACHE = {}
+_DAILY_CACHE = {}
 _TAIL_LIMIT = 4 * 1024 * 1024
 
 
@@ -90,6 +91,58 @@ def session_metrics(path):
         for key in list(_CACHE)[:-150]:
             _CACHE.pop(key, None)
     return dict(result)
+
+
+def daily_token_usage(roots, boundary_timestamp):
+    """Sum request-level usage since a local-day boundary across runtimes."""
+    names = ("input_tokens", "cached_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens")
+    totals = {name: 0 for name in names}
+    seen_paths = set()
+    for root in roots:
+        root = Path(root)
+        if not root.exists():
+            continue
+        for path in root.glob("**/*.jsonl"):
+            key = str(path); seen_paths.add(key)
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            if stat.st_mtime < boundary_timestamp:
+                continue
+            signature = (int(boundary_timestamp), stat.st_ino, stat.st_size, stat.st_mtime_ns)
+            cached = _DAILY_CACHE.get(key)
+            if cached and cached[0] == signature:
+                usage = cached[1]
+            else:
+                usage = {name: 0 for name in names}
+                try:
+                    with path.open(encoding="utf-8") as stream:
+                        for raw in stream:
+                            try:
+                                record = json.loads(raw)
+                                if _timestamp(record.get("timestamp")) < boundary_timestamp:
+                                    continue
+                                payload = record.get("payload", {})
+                                if payload.get("type") != "token_count":
+                                    continue
+                                last = (payload.get("info") or {}).get("last_token_usage") or {}
+                                for name in names:
+                                    usage[name] += int(last.get(name) or 0)
+                            except (ValueError, TypeError):
+                                continue
+                except OSError:
+                    continue
+                _DAILY_CACHE[key] = (signature, usage)
+            for name in names:
+                totals[name] += usage[name]
+    if len(_DAILY_CACHE) > 500:
+        for key in list(_DAILY_CACHE):
+            if key not in seen_paths:
+                _DAILY_CACHE.pop(key, None)
+        for key in list(_DAILY_CACHE)[:-400]:
+            _DAILY_CACHE.pop(key, None)
+    return totals
 
 
 def compact_tokens(value):

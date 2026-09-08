@@ -4,11 +4,11 @@ import time
 import urllib.request
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 from .curriculum import CurriculumLibrary, CurriculumStore, PATH_LABELS, STATE_LABELS
-from .conversation_metrics import compact_tokens, elapsed_label, session_metrics
+from .conversation_metrics import compact_tokens, daily_token_usage, elapsed_label, session_metrics
 from .lessons import LessonChatStore, LessonStore, ask_lesson_tutor, generate_lesson
 from .learning_feed import PREFERENCES_PATH, Store as LearningStore, build_feed as build_learning_feed_v2, context_profile
 from .network_diagnostics import benchmark_current_route, diagnose_network, display_node_name, switch_fastest
@@ -796,6 +796,7 @@ class App(QWidget):
             self.window_panel()
             for t in self.tasks:self.task_card(t)
             self.account_panel()
+            self.daily_token_panel()
         elif self.view_mode=="todo":self.todo_panel()
         elif self.view_mode=="learn":self.learning_panel()
         else:self.system_panel()
@@ -918,6 +919,16 @@ class App(QWidget):
         dialog=ConversationDetailsDialog(window,conversations,self); dialog.exec() if hasattr(dialog,"exec") else dialog.exec_()
     def open_network_details(self):
         dialog=NetworkDetailsDialog(self.system_metrics.get("network",{}),self); dialog.exec() if hasattr(dialog,"exec") else dialog.exec_()
+    def daily_token_panel(self):
+        now=datetime.now(); boundary=now.replace(hour=6,minute=0,second=0,microsecond=0)
+        if now<boundary:boundary-=timedelta(days=1)
+        usage=daily_token_usage([root for _,root in codex_session_roots()],boundary.timestamp())
+        total=int(usage.get("total_tokens") or (usage.get("input_tokens",0)+usage.get("output_tokens",0))); input_tokens=int(usage.get("input_tokens",0)); cached=int(usage.get("cached_input_tokens",0)); output=int(usage.get("output_tokens",0)); cache_percent=round(cached/input_tokens*100) if input_tokens else 0
+        panel=QFrame(); panel.setObjectName("dailyTokenPanel"); panel.setStyleSheet("QFrame#dailyTokenPanel{background:#f5f8ff;border:1px solid #dce7f7;border-radius:14px} QLabel{background:transparent;border:0}"); layout=QHBoxLayout(panel); layout.setContentsMargins(14,10,14,10); layout.setSpacing(12)
+        titles=QVBoxLayout(); titles.setSpacing(1); heading=QLabel("今日 Token"); heading.setStyleSheet("color:#354f77;font-size:13px;font-weight:700"); titles.addWidget(heading); period=QLabel(f"每天 06:00 重新计算 · 本周期从 {boundary.strftime('%m-%d %H:%M')} 开始"); period.setStyleSheet("color:#8290a6;font-size:9px"); titles.addWidget(period); layout.addLayout(titles); layout.addStretch()
+        for label,value,color in (("总消耗",compact_tokens(total),"#426fa8"),("输入",compact_tokens(input_tokens),"#627fa7"),("输出",compact_tokens(output),"#7b6ca8"),("缓存命中",f"{cache_percent}%","#4f9079")):
+            cell=QVBoxLayout(); cell.setSpacing(0); number=QLabel(value); number.setAlignment(Qt.AlignRight); number.setStyleSheet(f"color:{color};font-size:15px;font-weight:700"); caption=QLabel(label); caption.setAlignment(Qt.AlignRight); caption.setStyleSheet("color:#8793a5;font-size:9px"); cell.addWidget(number); cell.addWidget(caption); layout.addLayout(cell)
+        self.box.addWidget(panel)
     def account_panel(self):
         rows=profiles(); api_profiles=api_provider_profiles(); api_ready=sum(p.get("configured",False) for p in api_profiles); p=QFrame(); p.setObjectName("accountPanel"); p.setStyleSheet("QFrame#accountPanel{background:#f7fbf9;border:1px solid #dbeae3;border-radius:14px} QLabel{background:transparent}"); v=QVBoxLayout(p); v.setContentsMargins(13,10,13,12); v.setSpacing(7); head=QHBoxLayout(); heading=QLabel("账号额度"); heading.setFont(QFont("Noto Sans CJK SC",14,QFont.Bold)); heading.setStyleSheet("color:#273142"); head.addWidget(heading); subtitle=QLabel("自动读取 Codex Switch"); subtitle.setStyleSheet("color:#7f8999;font-size:10px"); head.addWidget(subtitle); head.addStretch(); count=QLabel(f"{len(rows)} 个 Plus · {api_ready} 个 API 备用"); count.setStyleSheet(badge_style("system")); head.addWidget(count); v.addLayout(head)
         if api_profiles:
