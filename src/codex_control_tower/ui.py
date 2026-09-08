@@ -410,15 +410,18 @@ def active_window_id():
 class BubbleButton(QPushButton):
     """Clickable to expand, draggable to reposition the floating bubble."""
     def __init__(self,parent=None):
-        super().__init__(parent); self.unread=0; self.cat=QPixmap(str(ASSETS_DIR/"mascots/control-cat.png")); self.setCursor(Qt.PointingHandCursor); self.setStyleSheet("border:0;background:transparent")
+        super().__init__(parent); self.unread=0; self.setCursor(Qt.PointingHandCursor); self.setStyleSheet("border:0;background:transparent")
     def setUnread(self,count):self.unread=count; self.update()
     def paintEvent(self,event):
         painter=QPainter(self); painter.setRenderHint(QPainter.Antialiasing)
-        rect=self.rect().adjusted(2,2,-2,-2); painter.setPen(QPen(QColor("#d7e5ee"),2)); painter.setBrush(QColor("#fffdf8")); painter.drawEllipse(rect)
-        if not self.cat.isNull():painter.drawPixmap(self.rect().adjusted(6,6,-6,-6),self.cat)
-        status=QColor("#df6f7b" if self.unread else "#65ad8f"); painter.setPen(QPen(QColor("white"),2)); painter.setBrush(status); painter.drawEllipse(self.width()-19,4,14,14)
+        rect=self.rect().adjusted(3,3,-3,-3); gradient=QLinearGradient(rect.topLeft(),rect.bottomRight())
+        gradient.setColorAt(0,QColor("#60a5fa" if not self.unread else "#fb7185")); gradient.setColorAt(1,QColor("#4f46e5" if not self.unread else "#dc2626"))
+        painter.setPen(QPen(QColor(255,255,255,230),2)); painter.setBrush(gradient); painter.drawEllipse(rect)
+        painter.setPen(Qt.NoPen); painter.setBrush(QColor("white")); cx,cy=self.width()/2,self.height()/2
         if self.unread:
-            painter.setPen(QColor("white")); painter.setFont(QFont("Noto Sans CJK SC",7,QFont.Bold)); painter.drawText(self.width()-19,4,14,14,Qt.AlignCenter,str(min(9,self.unread)))
+            painter.setPen(QColor("white")); painter.setFont(QFont("Noto Sans CJK SC",15,QFont.Bold)); painter.drawText(self.rect(),Qt.AlignCenter,str(self.unread))
+        else:
+            for dx,dy in ((0,-8),(8,0),(0,8),(-8,0),(0,0)):painter.drawEllipse(int(cx+dx-3),int(cy+dy-3),6,6)
     def mousePressEvent(self,event):
         self._press=global_point(event); self._origin=self.window().pos(); self._moved=False; super().mousePressEvent(event)
     def mouseMoveEvent(self,event):
