@@ -110,30 +110,27 @@ def daily_token_usage(roots, boundary_timestamp):
                 continue
             if stat.st_mtime < boundary_timestamp:
                 continue
-            signature = (int(boundary_timestamp), stat.st_ino, stat.st_size, stat.st_mtime_ns)
             cached = _DAILY_CACHE.get(key)
-            if cached and cached[0] == signature:
-                usage = cached[1]
-            else:
-                usage = {name: 0 for name in names}
+            reusable=bool(cached and cached["boundary"]==int(boundary_timestamp) and cached["inode"]==stat.st_ino and stat.st_size>=cached["offset"])
+            usage=dict(cached["usage"]) if reusable else {name:0 for name in names}; offset=cached["offset"] if reusable else 0
+            if stat.st_size>offset:
                 try:
-                    with path.open(encoding="utf-8") as stream:
-                        for raw in stream:
+                    with path.open("rb") as stream:
+                        stream.seek(offset)
+                        while True:
+                            start=stream.tell(); raw=stream.readline()
+                            if not raw:break
+                            if not raw.endswith(b"\n"):stream.seek(start); break
                             try:
-                                record = json.loads(raw)
-                                if _timestamp(record.get("timestamp")) < boundary_timestamp:
-                                    continue
-                                payload = record.get("payload", {})
-                                if payload.get("type") != "token_count":
-                                    continue
-                                last = (payload.get("info") or {}).get("last_token_usage") or {}
-                                for name in names:
-                                    usage[name] += int(last.get(name) or 0)
-                            except (ValueError, TypeError):
-                                continue
+                                record=json.loads(raw); payload=record.get("payload",{})
+                                if _timestamp(record.get("timestamp"))<boundary_timestamp or payload.get("type")!="token_count":continue
+                                last=(payload.get("info") or {}).get("last_token_usage") or {}
+                                for name in names:usage[name]+=int(last.get(name) or 0)
+                            except (ValueError,TypeError,UnicodeDecodeError):continue
+                        offset=stream.tell()
                 except OSError:
                     continue
-                _DAILY_CACHE[key] = (signature, usage)
+            _DAILY_CACHE[key]={"boundary":int(boundary_timestamp),"inode":stat.st_ino,"offset":offset,"usage":usage}
             for name in names:
                 totals[name] += usage[name]
     if len(_DAILY_CACHE) > 500:

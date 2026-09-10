@@ -41,6 +41,11 @@ class ConversationMetricsTests(unittest.TestCase):
             self.assertEqual(result["total_tokens"], 500)
             self.assertEqual(result["input_tokens"], 450)
             self.assertEqual(result["cached_input_tokens"], 320)
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({"timestamp": "2026-09-08T00:04:00Z", "payload": {"type": "token_count", "info": {"last_token_usage": {"input_tokens": 90, "cached_input_tokens": 60, "output_tokens": 10, "total_tokens": 100}}}}) + "\n")
+            updated = daily_token_usage([Path(directory)], datetime.fromisoformat("2026-09-08T00:00:00+00:00").timestamp())
+            self.assertEqual(updated["total_tokens"], 600)
+            self.assertEqual(updated["input_tokens"], 540)
 
 
 if __name__ == "__main__":

@@ -676,6 +676,7 @@ class App(QWidget):
         self.tasks=self.load(); self.todos=self.load_todos(); self.idea_store=ProjectIdeaStore(); self.view_mode="monitor"; self.windows=[]; self.expanded=False
         self.show_later_todos=False; self.show_todo_review=False; self.todo_archive_expanded=set()
         self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}; self.pending_bridge_recovery={}; self.pending_conversation_after_switch={}
+        self.window_executor=ThreadPoolExecutor(max_workers=1); self.window_future=None; self.window_refresh_force=False; self.window_refresh_before=None
         self.feed_error=""; self.feed_future=None; self.feed_executor=ThreadPoolExecutor(max_workers=1)
         self.feed_store=LearningStore(); self.feed_display_limit=6; self.feed_items=self.feed_store.recent(self.feed_display_limit); self.feed_stats=self.feed_store.stats()
         self.learning_context={"label":"具身智能前沿","terms":[],"topics":[]}; self.learning_mode="frontier"
@@ -696,7 +697,7 @@ class App(QWidget):
         for mode,button in (("monitor",self.monitor_tab),("todo",self.todo_tab),("learn",self.learn_tab),("system",self.system_tab)):
             button.setToolTip({"monitor":"任务监控","todo":"今日待办","learn":"等待学习","system":"系统监控"}[mode]); button.setIcon(QIcon(str(ASSETS_DIR/f"icons/{mode}.svg"))); button.setIconSize(QSize(16,16)); button.setCheckable(True); button.setCursor(Qt.PointingHandCursor); button.clicked.connect(lambda _,m=mode:self.switch_view(m)); h.addWidget(button)
         self.summary=QLabel(); self.summary.setMinimumWidth(0); self.summary.setStyleSheet("color:#667085;border:0;font-size:11px"); h.addWidget(self.summary,1)
-        scan_btn=QPushButton("刷新"); scan_btn.setToolTip("立即扫描 VS Code"); scan_btn.setStyleSheet("QPushButton{background:#f3f7fb;color:#52708f;border:1px solid #dbe7f1;border-radius:9px;padding:6px 11px;font-weight:700} QPushButton:hover{background:#eaf3fb}"); scan_btn.clicked.connect(self.refresh); h.addWidget(scan_btn)
+        scan_btn=QPushButton("刷新"); scan_btn.setToolTip("立即扫描 VS Code"); scan_btn.setStyleSheet("QPushButton{background:#f3f7fb;color:#52708f;border:1px solid #dbe7f1;border-radius:9px;padding:6px 11px;font-weight:700} QPushButton:hover{background:#eaf3fb}"); scan_btn.clicked.connect(lambda _=False:self.schedule_window_refresh(True)); h.addWidget(scan_btn)
         controls=(("—","缩成悬浮球",self.collapse),("□","最大化 / 还原",self.toggle_maximize),("×","关闭",self.close))
         for text,tip,fn in controls:
             button=QPushButton(text); button.setFixedSize(32,30); button.setToolTip(tip); button.setStyleSheet("QPushButton{padding:0;background:transparent;border:0;border-radius:9px;font-size:16px;color:#667085} QPushButton:hover{background:#f1ece7}" if text!="×" else "QPushButton{padding:0;background:transparent;border:0;border-radius:9px;font-size:18px;color:#667085} QPushButton:hover{background:#fff0f1;color:#c96672}"); button.clicked.connect(fn); h.addWidget(button)
@@ -724,10 +725,24 @@ class App(QWidget):
         for mode,button in (("monitor",self.monitor_tab),("todo",self.todo_tab),("learn",self.learn_tab),("system",self.system_tab)):
             fill,text,border=palettes[mode]; button.setChecked(self.view_mode==mode); button.setStyleSheet(f"QPushButton{{padding:6px 11px;background:{fill if self.view_mode==mode else '#fffdf9'};color:{text if self.view_mode==mode else '#657083'};border:1px solid {border if self.view_mode==mode else 'transparent'};border-radius:9px;font-weight:{'700' if self.view_mode==mode else '500'}}} QPushButton:hover{{background:{fill};color:{text}}}")
     def periodic_refresh(self):
-        before=(getattr(self,"running_count",0),getattr(self,"done_count",0),sum(w.get("completed",0)>self.seen.get(w.get("path",""),0) for w in self.windows))
-        self.refresh(render=self.view_mode in ("monitor","system"))
-        after=(self.running_count,self.done_count,sum(w.get("completed",0)>self.seen.get(w.get("path",""),0) for w in self.windows))
-        if self.view_mode=="learn" and before!=after:self.refresh(render=True)
+        self.schedule_window_refresh(False)
+    def schedule_window_refresh(self,force_render=False):
+        if self.window_future and not self.window_future.done():self.window_refresh_force=self.window_refresh_force or force_render; return
+        self.window_refresh_before=(getattr(self,"running_count",0),getattr(self,"done_count",0),sum(w.get("completed",0)>self.seen.get(w.get("path",""),0) for w in self.windows)); self.window_refresh_force=force_render; self.window_future=self.window_executor.submit(scan); QTimer.singleShot(40,self.poll_window_refresh)
+    def poll_window_refresh(self):
+        if not self.window_future:return
+        if not self.window_future.done():QTimer.singleShot(40,self.poll_window_refresh); return
+        try:self.windows=self.window_future.result(); self.apply_active_window_seen()
+        except Exception:pass
+        self.window_future=None; before=self.window_refresh_before; force=self.window_refresh_force; self.window_refresh_force=False; self.refresh(render=False,scan_windows=False); after=(self.running_count,self.done_count,sum(w.get("completed",0)>self.seen.get(w.get("path",""),0) for w in self.windows)); render=force or self.view_mode in ("monitor","system") or (self.view_mode=="learn" and before!=after)
+        if render:self.refresh(render=True,scan_windows=False)
+    def apply_active_window_seen(self):
+        active=active_window_id(); seen_changed=False
+        for w in self.windows:
+            try:is_active=int(w["id"],16)==active
+            except Exception:is_active=False
+            if is_active and w["completed"]>self.seen.get(w["path"],0):self.seen[w["path"]]=w["completed"]; seen_changed=True
+        if seen_changed:SEEN_FILE.write_text(json.dumps(self.seen,ensure_ascii=False,indent=2))
     def toggle(self):
         self.collapse() if self.expanded else self.expand()
     def poll_selection_shortcuts(self):
@@ -784,12 +799,7 @@ class App(QWidget):
         for shortcut in getattr(self,"vocab_shortcuts",[]):shortcut.setEnabled(active)
     def refresh(self,render=True,scan_windows=True):
         if scan_windows:
-            self.windows=scan(); active=active_window_id(); seen_changed=False
-            for w in self.windows:
-                try:is_active=int(w["id"],16)==active
-                except Exception:is_active=False
-                if is_active and w["completed"]>self.seen.get(w["path"],0):self.seen[w["path"]]=w["completed"]; seen_changed=True
-            if seen_changed:SEEN_FILE.write_text(json.dumps(self.seen,ensure_ascii=False,indent=2))
+            self.windows=scan(); self.apply_active_window_seen()
         unread=sum(w["completed"]>self.seen.get(w["path"],0) for w in self.windows); self.running_count=sum(w["status"]=="正在运行" for w in self.windows); self.done_count=sum(w["status"]=="运行结束" for w in self.windows)
         active_todos=[t for t in self.todos if not t.get("done")]; done_today=[t for t in self.todos if t.get("done") and t.get("done_date")==datetime.now().strftime("%Y-%m-%d")]
         if self.view_mode=="monitor":
@@ -1631,7 +1641,7 @@ class App(QWidget):
         if self.selection_popup:self.selection_popup.close()
         try:self.selection_receiver.close(); SOCKET_PATH.unlink(missing_ok=True)
         except OSError:pass
-        for executor in (self.feed_executor,self.system_executor,self.tts_executor,self.selection_executor):
+        for executor in (self.window_executor,self.feed_executor,self.system_executor,self.tts_executor,self.selection_executor):
             try:executor.shutdown(wait=False,cancel_futures=True)
             except TypeError:executor.shutdown(wait=False)
         event.accept()
