@@ -435,6 +435,20 @@ class BubbleButton(QPushButton):
         if self._moved:self.setDown(False); event.accept(); return
         super().mouseReleaseEvent(event)
 
+class TodoDragHandle(QPushButton):
+    def __init__(self,todo_id,on_drop,parent=None):
+        super().__init__("⠇",parent); self.todo_id=todo_id; self.on_drop=on_drop; self.press_point=None; self.moved=False; self.setFixedSize(29,29); self.setCursor(Qt.OpenHandCursor); self.setToolTip("按住拖动调整今日顺序"); self.setStyleSheet("QPushButton{padding:0;background:#fffaf2;color:#9a7448;border:1px solid #ead9bd;border-radius:8px;font-size:17px;font-weight:700} QPushButton:hover{background:#fff0d2;color:#714b23}")
+    def mousePressEvent(self,event):
+        if event.button()==Qt.LeftButton:self.press_point=global_point(event); self.moved=False; self.setCursor(Qt.ClosedHandCursor)
+        super().mousePressEvent(event)
+    def mouseMoveEvent(self,event):
+        if self.press_point is not None and event.buttons() & Qt.LeftButton and (global_point(event)-self.press_point).manhattanLength()>=QApplication.startDragDistance():self.moved=True; return
+        super().mouseMoveEvent(event)
+    def mouseReleaseEvent(self,event):
+        moved=self.moved; self.setCursor(Qt.OpenHandCursor); self.press_point=None; self.moved=False
+        if moved:self.setDown(False); self.on_drop(self.todo_id,global_point(event).y()); event.accept(); return
+        super().mouseReleaseEvent(event)
+
 class DraggableHeader(QFrame):
     def mousePressEvent(self,event):
         if event.button()==Qt.LeftButton:self._press=global_point(event); self._origin=self.window().pos()
@@ -660,7 +674,7 @@ class App(QWidget):
     def __init__(self):
         super().__init__()
         self.tasks=self.load(); self.todos=self.load_todos(); self.idea_store=ProjectIdeaStore(); self.view_mode="monitor"; self.windows=[]; self.expanded=False
-        self.show_later_todos=False; self.show_todo_review=False
+        self.show_later_todos=False; self.show_todo_review=False; self.todo_archive_expanded=set()
         self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}; self.pending_bridge_recovery={}; self.pending_conversation_after_switch={}
         self.feed_error=""; self.feed_future=None; self.feed_executor=ThreadPoolExecutor(max_workers=1)
         self.feed_store=LearningStore(); self.feed_display_limit=6; self.feed_items=self.feed_store.recent(self.feed_display_limit); self.feed_stats=self.feed_store.stats()
@@ -1353,17 +1367,21 @@ class App(QWidget):
         self.todo_project=QComboBox(); self.todo_project.addItem("不绑定项目","")
         for w in self.windows:self.todo_project.addItem(w["folder"],w["path"])
         options.addWidget(self.todo_project,1); entry_layout.addLayout(options); layout.addWidget(entry)
+        self.todo_drag_cards=[]
         def section(title,rows,kind):
             if not rows:return
             label=QLabel(title); label.setStyleSheet("color:#7c5b32;font-size:11px;font-weight:700;margin-top:3px"); layout.addWidget(label)
-            for position,todo in enumerate(rows):layout.addWidget(self.todo_row(todo,kind,position,len(rows),today))
+            if kind=="today":
+                for position,todo in enumerate(rows):card=self.todo_row(todo,kind,position,len(rows),today); self.todo_drag_cards.append((todo,card)); layout.addWidget(card)
+            else:
+                for position,todo in enumerate(rows):layout.addWidget(self.todo_row(todo,kind,position,len(rows),today))
         section("●  正在做",active,"active"); section("今日 · 按顺序推进",today_rows,"today")
         if not active and not today_rows:
             empty=QLabel("今天还没有安排，可以从“稍后”挑一件"); empty.setAlignment(Qt.AlignCenter); empty.setStyleSheet("color:#94a3b8;background:white;padding:18px;border-radius:9px"); layout.addWidget(empty)
         later_toggle=QPushButton(("收起稍后" if self.show_later_todos else "展开稍后")+f"  {len(later_rows)}"); later_toggle.setStyleSheet(button_style("todo")); later_toggle.clicked.connect(self.toggle_later_todos); layout.addWidget(later_toggle,0,Qt.AlignLeft)
         if self.show_later_todos:section("稍后 · 暂时不排时间",later_rows,"later")
         review=QPushButton(("收起回顾" if self.show_todo_review else "完成记录")+f"  {len(completed_rows)}"); review.setStyleSheet("background:#fffaf0;color:#8a6740;border:1px solid #eeddbf"); review.clicked.connect(self.toggle_todo_review); layout.addWidget(review,0,Qt.AlignLeft)
-        if self.show_todo_review:section("最近完成",completed_rows[:30],"done")
+        if self.show_todo_review:self.todo_archive(layout,completed_rows,today)
         self.box.addWidget(panel)
     def todo_row(self,todo,kind,position,count,today):
         active=kind=="active"; done=kind=="done"; card=QFrame(); card.setObjectName("todoCard"); card.setStyleSheet("QFrame#todoCard{background:#eef8ff;border:1px solid #b9def4;border-left:4px solid #74b7df;border-radius:9px}" if active else "QFrame#todoCard{background:white;border:1px solid #f0dfc1;border-radius:8px}"); line=QHBoxLayout(card); line.setContentsMargins(9 if active else 11,7,8,7); line.setSpacing(6)
@@ -1375,12 +1393,22 @@ class App(QWidget):
             overdue=not done and deadline<today; badge=QLabel(("已逾期 " if overdue else "截止 ")+deadline[5:]); badge.setStyleSheet(f"color:{'#b65461' if overdue else '#9a6a32'};background:{'#fff0f1' if overdue else '#fff5df'};padding:3px 6px;border-radius:5px;font-size:9px;font-weight:700"); line.addWidget(badge)
         if todo.get("project"):project=QLabel(todo["project"]); project.setStyleSheet("color:#66588e;background:#f0ebfb;padding:3px 6px;border-radius:5px;font-size:9px"); line.addWidget(project)
         if kind=="today":
-            for symbol,step,enabled in (("↑",-1,position>0),("↓",1,position<count-1)):
-                move=QPushButton(symbol); move.setFixedSize(29,29); move.setStyleSheet("QPushButton{padding:0;background:#fffaf2;color:#8a6740;border:1px solid #ead9bd;border-radius:8px;font-size:15px;font-weight:700} QPushButton:hover{background:#fff0d2;color:#714b23} QPushButton:disabled{padding:0;background:#f7f4ef;color:#d4cdc4;border-color:#eee8df}"); move.setEnabled(enabled); move.setToolTip("调整今日顺序"); move.clicked.connect(lambda _,t=todo,s=step:self.move_todo(t,s)); line.addWidget(move)
+            line.addWidget(TodoDragHandle(todo["id"],self.reorder_todo_at_y))
         if not done:
             bucket=QPushButton("移到今日" if kind=="later" else ("暂停" if active else "开始")); bucket.setStyleSheet("background:white;color:#397da7;border:1px solid #c9dfed;font-weight:700" if active else "background:#faf8f4;color:#665f57;border:1px solid #e8dfd4"); bucket.clicked.connect(lambda _,t=todo,k=kind:self.move_or_activate_todo(t,k)); line.addWidget(bucket)
             if kind=="today":later=QPushButton("稍后"); later.setToolTip("移回稍后"); later.clicked.connect(lambda _,t=todo:self.set_todo_bucket(t,"later")); line.addWidget(later)
-        edit=QPushButton("编辑"); edit.clicked.connect(lambda _,t=todo:self.edit_todo(t)); line.addWidget(edit); remove=QPushButton("×"); remove.setFixedSize(27,27); remove.setToolTip("从本朰彻底删除，不进入回顾"); remove.setStyleSheet("QPushButton{padding:0;border:0;background:transparent;color:#9aa1ad;font-size:17px} QPushButton:hover{background:#fee2e2;color:#dc2626}"); remove.clicked.connect(lambda _,t=todo:self.delete_todo(t)); line.addWidget(remove); return card
+        edit=QPushButton("编辑"); edit.clicked.connect(lambda _,t=todo:self.edit_todo(t)); line.addWidget(edit); remove=QPushButton("×"); remove.setFixedSize(27,27); remove.setToolTip("从本机彻底删除，不进入回顾"); remove.setStyleSheet("QPushButton{padding:0;border:0;background:transparent;color:#9aa1ad;font-size:17px} QPushButton:hover{background:#fee2e2;color:#dc2626}"); remove.clicked.connect(lambda _,t=todo:self.delete_todo(t)); line.addWidget(remove); return card
+    def todo_archive(self,layout,completed_rows,today):
+        months={}
+        for todo in completed_rows:
+            day=todo.get("done_date") or (todo.get("done_at") or "")[:10] or "日期未知"; months.setdefault(day[:7] if day!="日期未知" else day,{}).setdefault(day,[]).append(todo)
+        for month,days in months.items():
+            month_key="month:"+month; count=sum(len(rows) for rows in days.values()); month_text=(month.replace("-","年")+"月" if month!="日期未知" else month); expanded=month_key in self.todo_archive_expanded; button=QPushButton(("▾  " if expanded else "▸  ")+f"{month_text}    {count} 项"); button.setStyleSheet("QPushButton{text-align:left;background:#fffaf2;color:#765733;border:1px solid #eddfc8;border-radius:8px;font-weight:700}"); button.clicked.connect(lambda _,key=month_key:self.toggle_archive_group(key)); layout.addWidget(button)
+            if not expanded:continue
+            for day,rows in days.items():
+                day_key="day:"+day; day_open=day_key in self.todo_archive_expanded; day_label=(day[5:].replace("-","月")+"日" if day!="日期未知" else day); child=QPushButton(("▾  " if day_open else "▸  ")+f"{day_label}    {len(rows)} 项"); child.setStyleSheet("QPushButton{text-align:left;margin-left:18px;background:white;color:#806b52;border:1px solid #eee4d5;border-radius:7px;font-size:10px}"); child.clicked.connect(lambda _,key=day_key:self.toggle_archive_group(key)); layout.addWidget(child)
+                if day_open:
+                    for todo in rows:card=self.todo_row(todo,"done",0,len(rows),today); card.setContentsMargins(18,0,0,0); layout.addWidget(card)
     def add_todo(self):
         text=self.todo_input.text().strip()
         if not text:return
@@ -1404,8 +1432,22 @@ class App(QWidget):
     def move_todo(self,todo,step):
         rows=sorted((t for t in self.todos if not t.get("done") and not t.get("active") and t.get("bucket","today")=="today"),key=lambda t:t.get("order",0)); index=rows.index(todo); target=index+step
         if 0<=target<len(rows):todo["order"],rows[target]["order"]=rows[target].get("order",target),todo.get("order",index); self.save_todos(); self.refresh()
+    def reorder_todo_drag(self,todo_id,target):
+        rows=sorted((t for t in self.todos if not t.get("done") and not t.get("active") and t.get("bucket","today")=="today"),key=lambda t:t.get("order",0)); source=next((i for i,t in enumerate(rows) if t.get("id")==todo_id),None)
+        if source is None:return
+        todo=rows.pop(source)
+        if source<target:target-=1
+        rows.insert(max(0,min(target,len(rows))),todo)
+        for index,row in enumerate(rows):row["order"]=index
+        self.save_todos(); self.refresh(scan_windows=False)
+    def reorder_todo_at_y(self,todo_id,global_y):
+        target=sum(global_y>card.mapToGlobal(card.rect().center()).y() for _,card in self.todo_drag_cards); self.reorder_todo_drag(todo_id,target)
     def toggle_later_todos(self):self.show_later_todos=not self.show_later_todos; self.refresh(scan_windows=False)
     def toggle_todo_review(self):self.show_todo_review=not self.show_todo_review; self.refresh(scan_windows=False)
+    def toggle_archive_group(self,key):
+        if key in self.todo_archive_expanded:self.todo_archive_expanded.remove(key)
+        else:self.todo_archive_expanded.add(key)
+        self.refresh(scan_windows=False)
     def edit_todo(self,todo):
         dialog=QDialog(self); dialog.setWindowTitle("编辑待办"); dialog.setWindowFlag(Qt.WindowStaysOnTopHint,True); dialog.setMinimumWidth(440); dialog.setStyleSheet(dialog_stylesheet("todo"))
         form=QVBoxLayout(dialog); form.setContentsMargins(16,14,16,16); form.setSpacing(8); heading=QLabel("修改待办"); heading.setStyleSheet("color:#8a5b27;font-size:17px;font-weight:700"); form.addWidget(heading); form.addWidget(QLabel("内容")); content=QLineEdit(todo.get("text","")); content.selectAll(); form.addWidget(content); options=QHBoxLayout(); bucket_box=QComboBox(); bucket_box.addItem("今日","today"); bucket_box.addItem("稍后","later"); bucket_box.setCurrentIndex(max(0,bucket_box.findData(todo.get("bucket","today")))); options.addWidget(bucket_box); deadline_check=QCheckBox("有截止日期"); deadline_check.setChecked(bool(todo.get("deadline"))); options.addWidget(deadline_check); deadline_edit=QDateEdit(QDate.fromString(todo.get("deadline") or datetime.now().strftime("%Y-%m-%d"),"yyyy-MM-dd")); deadline_edit.setCalendarPopup(True); deadline_edit.setDisplayFormat("yyyy-MM-dd"); deadline_edit.setEnabled(deadline_check.isChecked()); deadline_check.toggled.connect(deadline_edit.setEnabled); options.addWidget(deadline_edit); project_box=QComboBox(); project_box.addItem("不绑定项目",""); known_paths=set()
