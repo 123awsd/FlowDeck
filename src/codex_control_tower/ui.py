@@ -1376,7 +1376,7 @@ class App(QWidget):
         if todo.get("project"):project=QLabel(todo["project"]); project.setStyleSheet("color:#66588e;background:#f0ebfb;padding:3px 6px;border-radius:5px;font-size:9px"); line.addWidget(project)
         if kind=="today":
             for symbol,step,enabled in (("↑",-1,position>0),("↓",1,position<count-1)):
-                move=QPushButton(symbol); move.setFixedSize(27,27); move.setEnabled(enabled); move.setToolTip("调整今日顺序"); move.clicked.connect(lambda _,t=todo,s=step:self.move_todo(t,s)); line.addWidget(move)
+                move=QPushButton(symbol); move.setFixedSize(29,29); move.setStyleSheet("QPushButton{padding:0;background:#fffaf2;color:#8a6740;border:1px solid #ead9bd;border-radius:8px;font-size:15px;font-weight:700} QPushButton:hover{background:#fff0d2;color:#714b23} QPushButton:disabled{padding:0;background:#f7f4ef;color:#d4cdc4;border-color:#eee8df}"); move.setEnabled(enabled); move.setToolTip("调整今日顺序"); move.clicked.connect(lambda _,t=todo,s=step:self.move_todo(t,s)); line.addWidget(move)
         if not done:
             bucket=QPushButton("移到今日" if kind=="later" else ("暂停" if active else "开始")); bucket.setStyleSheet("background:white;color:#397da7;border:1px solid #c9dfed;font-weight:700" if active else "background:#faf8f4;color:#665f57;border:1px solid #e8dfd4"); bucket.clicked.connect(lambda _,t=todo,k=kind:self.move_or_activate_todo(t,k)); line.addWidget(bucket)
             if kind=="today":later=QPushButton("稍后"); later.setToolTip("移回稍后"); later.clicked.connect(lambda _,t=todo:self.set_todo_bucket(t,"later")); line.addWidget(later)
