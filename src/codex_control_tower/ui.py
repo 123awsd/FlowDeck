@@ -21,11 +21,11 @@ from .theme import CANVAS, PAGE, SURFACE, app_stylesheet, badge_style, button_st
 from .vocabulary import VocabularyLibrary, VocabularyStore
 from .vscode_bridge import ensure_bridge_installed
 try:
-    from PySide6.QtCore import Qt, QTimer, QEvent, QPoint, QSize, QDate, QPropertyAnimation, QEasingCurve
+    from PySide6.QtCore import Qt, QTimer, QEvent, QPoint, QSize, QDate, QPropertyAnimation, QParallelAnimationGroup, QEasingCurve
     from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QShortcut
     from PySide6.QtWidgets import *
 except ImportError:
-    from PyQt5.QtCore import Qt, QTimer, QEvent, QPoint, QSize, QDate, QPropertyAnimation, QEasingCurve
+    from PyQt5.QtCore import Qt, QTimer, QEvent, QPoint, QSize, QDate, QPropertyAnimation, QParallelAnimationGroup, QEasingCurve
     from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
     from PyQt5.QtWidgets import *
 
@@ -677,7 +677,7 @@ class App(QWidget):
     def __init__(self):
         super().__init__()
         self.tasks=self.load(); self.todos=self.load_todos(); self.idea_store=ProjectIdeaStore(); self.view_mode="monitor"; self.windows=[]; self.expanded=False
-        self.show_later_todos=False; self.show_todo_review=False; self.todo_archive_expanded=set(); self.todo_drag_ghost=None; self.todo_drag_indicator=None; self.todo_drag_source=None; self.todo_drag_offset=QPoint(); self.todo_drag_target=0; self.todo_snap_animation=None
+        self.show_later_todos=False; self.show_todo_review=False; self.todo_archive_expanded=set(); self.todo_drag_ghost=None; self.todo_drag_indicator=None; self.todo_drag_source=None; self.todo_drag_offset=QPoint(); self.todo_drag_target=0; self.todo_drag_preview_index=0; self.todo_drag_layout=None; self.todo_reorder_animation=None; self.todo_snap_animation=None
         self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}; self.pending_bridge_recovery={}; self.pending_conversation_after_switch={}
         self.window_executor=ThreadPoolExecutor(max_workers=1); self.window_future=None; self.window_refresh_force=False; self.window_refresh_before=None
         self.feed_error=""; self.feed_future=None; self.feed_executor=ThreadPoolExecutor(max_workers=1)
@@ -1385,7 +1385,9 @@ class App(QWidget):
             if not rows:return
             label=QLabel(title); label.setStyleSheet("color:#7c5b32;font-size:11px;font-weight:700;margin-top:3px"); layout.addWidget(label)
             if kind=="today":
-                for position,todo in enumerate(rows):card=self.todo_row(todo,kind,position,len(rows),today); self.todo_drag_cards.append((todo,card)); layout.addWidget(card)
+                holder=QWidget(); rows_layout=QVBoxLayout(holder); rows_layout.setContentsMargins(0,0,0,0); rows_layout.setSpacing(7); self.todo_drag_layout=rows_layout
+                for position,todo in enumerate(rows):card=self.todo_row(todo,kind,position,len(rows),today); self.todo_drag_cards.append((todo,card)); rows_layout.addWidget(card)
+                layout.addWidget(holder)
             else:
                 for position,todo in enumerate(rows):layout.addWidget(self.todo_row(todo,kind,position,len(rows),today))
         section("●  正在做",active,"active"); section("今日 · 按顺序推进",today_rows,"today")
@@ -1456,31 +1458,38 @@ class App(QWidget):
     def begin_todo_drag(self,todo_id,press_point):
         pair=next(((todo,card) for todo,card in self.todo_drag_cards if todo.get("id")==todo_id),None)
         if not pair:return
-        self.todo_drag_source=pair[1]; top_left=pair[1].mapToGlobal(QPoint(0,0)); self.todo_drag_offset=press_point-top_left
+        self.todo_drag_source=pair[1]; self.todo_drag_preview_index=next(i for i,(todo,_) in enumerate(self.todo_drag_cards) if todo.get("id")==todo_id); top_left=pair[1].mapToGlobal(QPoint(0,0)); self.todo_drag_offset=press_point-top_left
         ghost=QLabel(); ghost.setWindowFlags(Qt.Tool|Qt.FramelessWindowHint|Qt.WindowStaysOnTopHint); ghost.setAttribute(Qt.WA_TransparentForMouseEvents,True); ghost.setAttribute(Qt.WA_ShowWithoutActivating,True); ghost.setPixmap(pair[1].grab()); ghost.resize(pair[1].size()); ghost.setWindowOpacity(.9); ghost.move(top_left); ghost.show(); ghost.raise_(); self.todo_drag_ghost=ghost
         effect=QGraphicsOpacityEffect(pair[1]); effect.setOpacity(.28); pair[1].setGraphicsEffect(effect)
         indicator=QFrame(self.content); indicator.setFixedHeight(4); indicator.setStyleSheet("background:#d49a58;border-radius:2px"); indicator.hide(); self.todo_drag_indicator=indicator
     def update_todo_drag(self,todo_id,point):
         if not self.todo_drag_ghost:return
-        self.todo_drag_ghost.move(point-self.todo_drag_offset); self.todo_drag_target=sum(point.y()>card.mapToGlobal(card.rect().center()).y() for _,card in self.todo_drag_cards)
-        cards=[card for todo,card in self.todo_drag_cards if todo.get("id")!=todo_id]; target=self.todo_drag_target
-        source_index=next((i for i,(todo,_) in enumerate(self.todo_drag_cards) if todo.get("id")==todo_id),0)
-        if source_index<target:target-=1
-        target=max(0,min(target,len(cards))); reference=(cards[target] if target<len(cards) else (cards[-1] if cards else self.todo_drag_source)); local=reference.mapTo(self.content,QPoint(0,0)); y=local.y()-5 if target<len(cards) else local.y()+reference.height()+2; self.todo_drag_indicator.setGeometry(local.x()+8,y,max(40,reference.width()-16),4); self.todo_drag_indicator.show(); self.todo_drag_indicator.raise_()
+        self.todo_drag_ghost.move(point-self.todo_drag_offset); others=[(todo,card) for todo,card in self.todo_drag_cards if todo.get("id")!=todo_id]; target=sum(point.y()>card.mapToGlobal(card.rect().center()).y() for _,card in others); target=max(0,min(target,len(others))); self.todo_drag_target=target
+        if target!=self.todo_drag_preview_index:self.preview_todo_reorder(todo_id,target)
+        local=self.todo_drag_source.mapTo(self.content,QPoint(0,0)); self.todo_drag_indicator.setGeometry(local.x()+8,local.y()-5,max(40,self.todo_drag_source.width()-16),4); self.todo_drag_indicator.show(); self.todo_drag_indicator.raise_()
         viewport_point=self.area.viewport().mapFromGlobal(point); bar=self.area.verticalScrollBar()
         if viewport_point.y()<35:bar.setValue(bar.value()-12)
         elif viewport_point.y()>self.area.viewport().height()-35:bar.setValue(bar.value()+12)
     def finish_todo_drag(self,todo_id,point):
         if not self.todo_drag_ghost:self.reorder_todo_at_y(todo_id,point.y()); return
-        self.update_todo_drag(todo_id,point); target=self.todo_drag_target; cards=[card for todo,card in self.todo_drag_cards if todo.get("id")!=todo_id]; source_index=next((i for i,(todo,_) in enumerate(self.todo_drag_cards) if todo.get("id")==todo_id),0)
-        normalized=max(0,min(target-(1 if source_index<target else 0),len(cards))); destination=(cards[normalized] if normalized<len(cards) else (cards[-1] if cards else self.todo_drag_source)); end=destination.mapToGlobal(QPoint(0,0));
-        if normalized>=len(cards) and cards:end.setY(end.y()+destination.height()+7)
-        animation=QPropertyAnimation(self.todo_drag_ghost,b"pos",self); animation.setDuration(130); animation.setStartValue(self.todo_drag_ghost.pos()); animation.setEndValue(end); animation.setEasingCurve(QEasingCurve.OutCubic); animation.finished.connect(lambda:self.complete_todo_drag(todo_id,target)); self.todo_snap_animation=animation; animation.start()
-    def complete_todo_drag(self,todo_id,target):
+        self.update_todo_drag(todo_id,point); end=self.todo_drag_source.mapToGlobal(QPoint(0,0)); animation=QPropertyAnimation(self.todo_drag_ghost,b"pos",self); animation.setDuration(130); animation.setStartValue(self.todo_drag_ghost.pos()); animation.setEndValue(end); animation.setEasingCurve(QEasingCurve.OutCubic); animation.finished.connect(self.complete_todo_drag); self.todo_snap_animation=animation; animation.start()
+    def preview_todo_reorder(self,todo_id,target):
+        if not self.todo_drag_layout:return
+        source=next((i for i,(todo,_) in enumerate(self.todo_drag_cards) if todo.get("id")==todo_id),None)
+        if source is None or source==target:return
+        if self.todo_reorder_animation:self.todo_reorder_animation.stop()
+        old={card:card.geometry() for _,card in self.todo_drag_cards}; pair=self.todo_drag_cards.pop(source); self.todo_drag_cards.insert(target,pair); self.todo_drag_layout.removeWidget(pair[1]); self.todo_drag_layout.insertWidget(target,pair[1]); self.todo_drag_layout.invalidate(); self.todo_drag_layout.activate(); new={card:card.geometry() for _,card in self.todo_drag_cards}; group=QParallelAnimationGroup(self)
+        for _,card in self.todo_drag_cards:
+            if old.get(card)==new.get(card):continue
+            animation=QPropertyAnimation(card,b"geometry",group); animation.setDuration(115); animation.setStartValue(old[card]); animation.setEndValue(new[card]); animation.setEasingCurve(QEasingCurve.OutCubic); group.addAnimation(animation)
+        self.todo_drag_preview_index=target; self.todo_reorder_animation=group; group.start()
+    def complete_todo_drag(self):
+        if self.todo_reorder_animation:self.todo_reorder_animation.stop()
         if self.todo_drag_source:self.todo_drag_source.setGraphicsEffect(None)
         if self.todo_drag_indicator:self.todo_drag_indicator.deleteLater()
         if self.todo_drag_ghost:self.todo_drag_ghost.close(); self.todo_drag_ghost.deleteLater()
-        self.todo_drag_source=None; self.todo_drag_indicator=None; self.todo_drag_ghost=None; self.todo_snap_animation=None; self.reorder_todo_drag(todo_id,target)
+        for index,(todo,_) in enumerate(self.todo_drag_cards):todo["order"]=index
+        self.todo_drag_source=None; self.todo_drag_indicator=None; self.todo_drag_ghost=None; self.todo_reorder_animation=None; self.todo_snap_animation=None; self.save_todos(); self.refresh(scan_windows=False)
     def reorder_todo_at_y(self,todo_id,global_y):
         target=sum(global_y>card.mapToGlobal(card.rect().center()).y() for _,card in self.todo_drag_cards); self.reorder_todo_drag(todo_id,target)
     def toggle_later_todos(self):self.show_later_todos=not self.show_later_todos; self.refresh(scan_windows=False)
