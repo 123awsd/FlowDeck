@@ -21,11 +21,11 @@ from .theme import CANVAS, PAGE, SURFACE, app_stylesheet, badge_style, button_st
 from .vocabulary import VocabularyLibrary, VocabularyStore
 from .vscode_bridge import ensure_bridge_installed
 try:
-    from PySide6.QtCore import Qt, QTimer, QEvent, QPoint, QSize, QDate
+    from PySide6.QtCore import Qt, QTimer, QEvent, QPoint, QSize, QDate, QPropertyAnimation, QEasingCurve
     from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QShortcut
     from PySide6.QtWidgets import *
 except ImportError:
-    from PyQt5.QtCore import Qt, QTimer, QEvent, QPoint, QSize, QDate
+    from PyQt5.QtCore import Qt, QTimer, QEvent, QPoint, QSize, QDate, QPropertyAnimation, QEasingCurve
     from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
     from PyQt5.QtWidgets import *
 
@@ -436,17 +436,20 @@ class BubbleButton(QPushButton):
         super().mouseReleaseEvent(event)
 
 class TodoDragHandle(QPushButton):
-    def __init__(self,todo_id,on_drop,parent=None):
-        super().__init__("⠇",parent); self.todo_id=todo_id; self.on_drop=on_drop; self.press_point=None; self.moved=False; self.setFixedSize(29,29); self.setCursor(Qt.OpenHandCursor); self.setToolTip("按住拖动调整今日顺序"); self.setStyleSheet("QPushButton{padding:0;background:#fffaf2;color:#9a7448;border:1px solid #ead9bd;border-radius:8px;font-size:17px;font-weight:700} QPushButton:hover{background:#fff0d2;color:#714b23}")
+    def __init__(self,todo_id,on_start,on_move,on_drop,parent=None):
+        super().__init__("⠇",parent); self.todo_id=todo_id; self.on_start=on_start; self.on_move=on_move; self.on_drop=on_drop; self.press_point=None; self.moved=False; self.setFixedSize(29,29); self.setCursor(Qt.OpenHandCursor); self.setToolTip("按住拖动调整今日顺序"); self.setStyleSheet("QPushButton{padding:0;background:#fffaf2;color:#9a7448;border:1px solid #ead9bd;border-radius:8px;font-size:17px;font-weight:700} QPushButton:hover{background:#fff0d2;color:#714b23}")
     def mousePressEvent(self,event):
         if event.button()==Qt.LeftButton:self.press_point=global_point(event); self.moved=False; self.setCursor(Qt.ClosedHandCursor)
         super().mousePressEvent(event)
     def mouseMoveEvent(self,event):
-        if self.press_point is not None and event.buttons() & Qt.LeftButton and (global_point(event)-self.press_point).manhattanLength()>=QApplication.startDragDistance():self.moved=True; return
+        point=global_point(event)
+        if self.press_point is not None and event.buttons() & Qt.LeftButton:
+            if not self.moved and (point-self.press_point).manhattanLength()>=QApplication.startDragDistance():self.moved=True; self.on_start(self.todo_id,self.press_point)
+            if self.moved:self.on_move(self.todo_id,point); event.accept(); return
         super().mouseMoveEvent(event)
     def mouseReleaseEvent(self,event):
         moved=self.moved; self.setCursor(Qt.OpenHandCursor); self.press_point=None; self.moved=False
-        if moved:self.setDown(False); self.on_drop(self.todo_id,global_point(event).y()); event.accept(); return
+        if moved:self.setDown(False); self.on_drop(self.todo_id,global_point(event)); event.accept(); return
         super().mouseReleaseEvent(event)
 
 class DraggableHeader(QFrame):
@@ -674,7 +677,7 @@ class App(QWidget):
     def __init__(self):
         super().__init__()
         self.tasks=self.load(); self.todos=self.load_todos(); self.idea_store=ProjectIdeaStore(); self.view_mode="monitor"; self.windows=[]; self.expanded=False
-        self.show_later_todos=False; self.show_todo_review=False; self.todo_archive_expanded=set()
+        self.show_later_todos=False; self.show_todo_review=False; self.todo_archive_expanded=set(); self.todo_drag_ghost=None; self.todo_drag_indicator=None; self.todo_drag_source=None; self.todo_drag_offset=QPoint(); self.todo_drag_target=0; self.todo_snap_animation=None
         self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}; self.pending_bridge_recovery={}; self.pending_conversation_after_switch={}
         self.window_executor=ThreadPoolExecutor(max_workers=1); self.window_future=None; self.window_refresh_force=False; self.window_refresh_before=None
         self.feed_error=""; self.feed_future=None; self.feed_executor=ThreadPoolExecutor(max_workers=1)
@@ -1403,7 +1406,7 @@ class App(QWidget):
             overdue=not done and deadline<today; badge=QLabel(("已逾期 " if overdue else "截止 ")+deadline[5:]); badge.setStyleSheet(f"color:{'#b65461' if overdue else '#9a6a32'};background:{'#fff0f1' if overdue else '#fff5df'};padding:3px 6px;border-radius:5px;font-size:9px;font-weight:700"); line.addWidget(badge)
         if todo.get("project"):project=QLabel(todo["project"]); project.setStyleSheet("color:#66588e;background:#f0ebfb;padding:3px 6px;border-radius:5px;font-size:9px"); line.addWidget(project)
         if kind=="today":
-            line.addWidget(TodoDragHandle(todo["id"],self.reorder_todo_at_y))
+            line.addWidget(TodoDragHandle(todo["id"],self.begin_todo_drag,self.update_todo_drag,self.finish_todo_drag))
         if not done:
             bucket=QPushButton("移到今日" if kind=="later" else ("暂停" if active else "开始")); bucket.setStyleSheet("background:white;color:#397da7;border:1px solid #c9dfed;font-weight:700" if active else "background:#faf8f4;color:#665f57;border:1px solid #e8dfd4"); bucket.clicked.connect(lambda _,t=todo,k=kind:self.move_or_activate_todo(t,k)); line.addWidget(bucket)
             if kind=="today":later=QPushButton("稍后"); later.setToolTip("移回稍后"); later.clicked.connect(lambda _,t=todo:self.set_todo_bucket(t,"later")); line.addWidget(later)
@@ -1450,6 +1453,34 @@ class App(QWidget):
         rows.insert(max(0,min(target,len(rows))),todo)
         for index,row in enumerate(rows):row["order"]=index
         self.save_todos(); self.refresh(scan_windows=False)
+    def begin_todo_drag(self,todo_id,press_point):
+        pair=next(((todo,card) for todo,card in self.todo_drag_cards if todo.get("id")==todo_id),None)
+        if not pair:return
+        self.todo_drag_source=pair[1]; top_left=pair[1].mapToGlobal(QPoint(0,0)); self.todo_drag_offset=press_point-top_left
+        ghost=QLabel(); ghost.setWindowFlags(Qt.Tool|Qt.FramelessWindowHint|Qt.WindowStaysOnTopHint); ghost.setAttribute(Qt.WA_TransparentForMouseEvents,True); ghost.setAttribute(Qt.WA_ShowWithoutActivating,True); ghost.setPixmap(pair[1].grab()); ghost.resize(pair[1].size()); ghost.setWindowOpacity(.9); ghost.move(top_left); ghost.show(); ghost.raise_(); self.todo_drag_ghost=ghost
+        effect=QGraphicsOpacityEffect(pair[1]); effect.setOpacity(.28); pair[1].setGraphicsEffect(effect)
+        indicator=QFrame(self.content); indicator.setFixedHeight(4); indicator.setStyleSheet("background:#d49a58;border-radius:2px"); indicator.hide(); self.todo_drag_indicator=indicator
+    def update_todo_drag(self,todo_id,point):
+        if not self.todo_drag_ghost:return
+        self.todo_drag_ghost.move(point-self.todo_drag_offset); self.todo_drag_target=sum(point.y()>card.mapToGlobal(card.rect().center()).y() for _,card in self.todo_drag_cards)
+        cards=[card for todo,card in self.todo_drag_cards if todo.get("id")!=todo_id]; target=self.todo_drag_target
+        source_index=next((i for i,(todo,_) in enumerate(self.todo_drag_cards) if todo.get("id")==todo_id),0)
+        if source_index<target:target-=1
+        target=max(0,min(target,len(cards))); reference=(cards[target] if target<len(cards) else (cards[-1] if cards else self.todo_drag_source)); local=reference.mapTo(self.content,QPoint(0,0)); y=local.y()-5 if target<len(cards) else local.y()+reference.height()+2; self.todo_drag_indicator.setGeometry(local.x()+8,y,max(40,reference.width()-16),4); self.todo_drag_indicator.show(); self.todo_drag_indicator.raise_()
+        viewport_point=self.area.viewport().mapFromGlobal(point); bar=self.area.verticalScrollBar()
+        if viewport_point.y()<35:bar.setValue(bar.value()-12)
+        elif viewport_point.y()>self.area.viewport().height()-35:bar.setValue(bar.value()+12)
+    def finish_todo_drag(self,todo_id,point):
+        if not self.todo_drag_ghost:self.reorder_todo_at_y(todo_id,point.y()); return
+        self.update_todo_drag(todo_id,point); target=self.todo_drag_target; cards=[card for todo,card in self.todo_drag_cards if todo.get("id")!=todo_id]; source_index=next((i for i,(todo,_) in enumerate(self.todo_drag_cards) if todo.get("id")==todo_id),0)
+        normalized=max(0,min(target-(1 if source_index<target else 0),len(cards))); destination=(cards[normalized] if normalized<len(cards) else (cards[-1] if cards else self.todo_drag_source)); end=destination.mapToGlobal(QPoint(0,0));
+        if normalized>=len(cards) and cards:end.setY(end.y()+destination.height()+7)
+        animation=QPropertyAnimation(self.todo_drag_ghost,b"pos",self); animation.setDuration(130); animation.setStartValue(self.todo_drag_ghost.pos()); animation.setEndValue(end); animation.setEasingCurve(QEasingCurve.OutCubic); animation.finished.connect(lambda:self.complete_todo_drag(todo_id,target)); self.todo_snap_animation=animation; animation.start()
+    def complete_todo_drag(self,todo_id,target):
+        if self.todo_drag_source:self.todo_drag_source.setGraphicsEffect(None)
+        if self.todo_drag_indicator:self.todo_drag_indicator.deleteLater()
+        if self.todo_drag_ghost:self.todo_drag_ghost.close(); self.todo_drag_ghost.deleteLater()
+        self.todo_drag_source=None; self.todo_drag_indicator=None; self.todo_drag_ghost=None; self.todo_snap_animation=None; self.reorder_todo_drag(todo_id,target)
     def reorder_todo_at_y(self,todo_id,global_y):
         target=sum(global_y>card.mapToGlobal(card.rect().center()).y() for _,card in self.todo_drag_cards); self.reorder_todo_drag(todo_id,target)
     def toggle_later_todos(self):self.show_later_todos=not self.show_later_todos; self.refresh(scan_windows=False)
@@ -1638,6 +1669,8 @@ class App(QWidget):
     def closeEvent(self,event):
         self.timer.stop(); self.system_timer.stop(); self.selection_timer.stop()
         self.cancel_vocab_audio(True)
+        if self.todo_drag_source:self.todo_drag_source.setGraphicsEffect(None)
+        if self.todo_drag_ghost:self.todo_drag_ghost.close()
         if self.selection_popup:self.selection_popup.close()
         try:self.selection_receiver.close(); SOCKET_PATH.unlink(missing_ok=True)
         except OSError:pass
