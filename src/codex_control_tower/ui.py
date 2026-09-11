@@ -789,6 +789,18 @@ class App(QWidget):
     def eventFilter(self,obj,event):
         if hasattr(self,"area") and obj is self.area.viewport() and event.type()==QEvent.Resize:QTimer.singleShot(0,self.position_floating_tutor)
         return super().eventFilter(obj,event)
+    def changeEvent(self,event):
+        super().changeEvent(event)
+        if event.type()==QEvent.ActivationChange and self.expanded and not self.isActiveWindow():
+            # Give menus and child dialogs time to become the active Qt window
+            # before deciding that focus really moved to another application.
+            QTimer.singleShot(180,self.collapse_if_unfocused)
+    def collapse_if_unfocused(self):
+        if not self.expanded or self.isActiveWindow():return
+        active=QApplication.activeWindow(); popup=QApplication.activePopupWidget(); modal=QApplication.activeModalWidget()
+        if popup or modal:return
+        if active and (active is self or self.isAncestorOf(active)):return
+        self.collapse()
     def position_floating_tutor(self):
         if not hasattr(self,"floating_tutor_button"):return
         viewport=self.area.viewport(); button=self.floating_tutor_button; button.move(max(8,viewport.width()-button.width()-18),max(8,viewport.height()-button.height()-16)); button.raise_()
