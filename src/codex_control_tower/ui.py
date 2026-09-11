@@ -722,7 +722,11 @@ class App(QWidget):
         if mode!="learn":self.cancel_vocab_audio(True); self.vocab_last_spoken_id=None
         self.view_mode=mode
         if mode=="system":self.schedule_system_sample()
-        self.refresh()
+        # Page changes must never wait for desktop/remote-window discovery.
+        # Render the latest snapshot immediately, then reconcile it in the
+        # existing background scanner.
+        self.refresh(scan_windows=False)
+        if mode=="monitor":self.schedule_window_refresh(False)
     def update_tabs(self):
         palettes={"monitor":("#e4f1ff","#3f6f9e","#bcd8f2"),"todo":("#fff1d5","#8a5b27","#f2d39b"),"learn":("#f0ebff","#685a94","#d8cef0"),"system":("#e6f6ef","#3d7863","#c1e3d5")}
         for mode,button in (("monitor",self.monitor_tab),("todo",self.todo_tab),("learn",self.learn_tab),("system",self.system_tab)):
