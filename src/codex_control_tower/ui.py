@@ -773,6 +773,8 @@ class App(QWidget):
     def collapse(self):
         if self.isMaximized():self.showNormal()
         self.cancel_vocab_audio(True); self.vocab_last_spoken_id=None
+        for dialog in list(self.tutor_dialogs):
+            if dialog.isVisible():dialog.close()
         self.expanded=False; self.floating_tutor_button.hide(); self.shell.hide(); self.bubble.show(); self.root.setContentsMargins(0,0,0,0); self.setMinimumSize(58,58); self.setMaximumSize(58,58); self.setWindowFlag(Qt.FramelessWindowHint,True); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.resize(58,58); self.show(); self.update_vocab_shortcuts(); QTimer.singleShot(100,self.ensure_on_top)
     def toggle_maximize(self):
         if self.isMaximized():self.showNormal(); self.resize(840,540)
@@ -788,6 +790,8 @@ class App(QWidget):
             if w:w.deleteLater()
     def eventFilter(self,obj,event):
         if hasattr(self,"area") and obj is self.area.viewport() and event.type()==QEvent.Resize:QTimer.singleShot(0,self.position_floating_tutor)
+        if obj in getattr(self,"tutor_dialogs",[]) and event.type()==QEvent.WindowDeactivate and self.expanded:
+            QTimer.singleShot(180,self.collapse_if_unfocused)
         return super().eventFilter(obj,event)
     def changeEvent(self,event):
         super().changeEvent(event)
@@ -800,6 +804,8 @@ class App(QWidget):
         active=QApplication.activeWindow(); popup=QApplication.activePopupWidget(); modal=QApplication.activeModalWidget()
         if popup or modal:return
         if active and (active is self or self.isAncestorOf(active)):return
+        for dialog in self.tutor_dialogs:
+            if dialog.isVisible() and active and (active is dialog or dialog.isAncestorOf(active)):return
         self.collapse()
     def position_floating_tutor(self):
         if not hasattr(self,"floating_tutor_button"):return
@@ -1278,7 +1284,7 @@ class App(QWidget):
         if not bundle or not current:return
         lesson=self.lesson_store.get(bundle,current)
         if not lesson:return
-        dialog=LessonChatDialog(self,bundle,bundle["concept_by_id"][current],lesson,self.lesson_chat_store,self.tutor_executor); self.tutor_dialogs.append(dialog); dialog.finished.connect(lambda _,item=dialog:self.release_tutor_dialog(item)); dialog.show(); self.place_tutor_dialog(dialog); dialog.raise_(); dialog.activateWindow()
+        dialog=LessonChatDialog(self,bundle,bundle["concept_by_id"][current],lesson,self.lesson_chat_store,self.tutor_executor); self.tutor_dialogs.append(dialog); dialog.installEventFilter(self); dialog.finished.connect(lambda _,item=dialog:self.release_tutor_dialog(item)); dialog.show(); self.place_tutor_dialog(dialog); dialog.raise_(); dialog.activateWindow()
     def place_tutor_dialog(self,dialog):
         if self.isMaximized():self.showNormal(); self.resize(840,min(900,max(540,QApplication.primaryScreen().availableGeometry().height()-40))); QApplication.processEvents()
         screens=QApplication.screens(); main_rect=self.frameGeometry(); current=QApplication.screenAt(main_rect.center()) or QApplication.primaryScreen(); available=current.availableGeometry(); gap=12
