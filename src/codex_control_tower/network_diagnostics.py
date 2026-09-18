@@ -20,6 +20,7 @@ SERVICES = {
     "GitHub": "https://github.com/",
     "Hugging Face": "https://huggingface.co/",
 }
+CODEX_DOMAINS = ("openai.com", "chatgpt.com")
 _RESULT_CACHE = {}
 
 
@@ -174,6 +175,33 @@ def _connection_routes():
     return result
 
 
+def _domain_matches(host, domains):
+    host = str(host or "").lower().rstrip(".")
+    return any(host == domain or host.endswith("." + domain) for domain in domains)
+
+
+def _codex_connection(row):
+    metadata = row.get("metadata") or {}
+    host = metadata.get("host") or ""
+    rule_payload = row.get("rulePayload") or ""
+    return _domain_matches(host, CODEX_DOMAINS) or _domain_matches(rule_payload, CODEX_DOMAINS)
+
+
+def close_codex_connections():
+    """Close only official Codex/OpenAI connections so they reconnect on the new route."""
+    rows = controller_json("/connections", 2).get("connections", [])
+    closed = []
+    for row in rows:
+        connection_id = row.get("id")
+        if not connection_id or not _codex_connection(row):
+            continue
+        path = "/connections/" + urllib.parse.quote(str(connection_id), safe="")
+        controller_request(path, method="DELETE", timeout=2)
+        metadata = row.get("metadata") or {}
+        closed.append(str(metadata.get("host") or row.get("rulePayload") or "Codex"))
+    return closed
+
+
 def diagnose_network():
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         checks = dict(executor.map(_service_check, SERVICES.items()))
@@ -256,10 +284,17 @@ def recommend_nodes(services=None, limit=12):
     _RESULT_CACHE[cache_key] = (time.monotonic(), result); return result
 
 
-def switch_fastest(service):
+def switch_fastest(service, reconnect=False):
     result = recommend_nodes((service,)); choice = result.get(service)
     if not choice:raise ConnectionError(f"没有找到适合 {service} 的可用节点")
+    proxies = controller_json("/proxies", 2).get("proxies", {})
+    previous = (proxies.get(choice["group"]) or {}).get("now")
     path = "/proxies/" + urllib.parse.quote(choice["group"], safe="")
     controller_request(path, method="PUT", payload={"name": choice["node"]}, timeout=3)
+    selected = (controller_json("/proxies", 2).get("proxies", {}).get(choice["group"]) or {}).get("now")
+    if selected != choice["node"]:
+        raise ConnectionError("节点切换请求已发送，但 Mihomo 未确认新节点")
+    closed = close_codex_connections() if reconnect and service == "Codex" else []
     _RESULT_CACHE.clear()
-    return {"service": service, **choice, "display_node": display_node_name(choice["node"])}
+    return {"service": service, **choice, "previous": previous, "selected": selected, "reconnect": bool(reconnect),
+            "closed_connections": len(closed), "closed_hosts": list(dict.fromkeys(closed)), "display_node": display_node_name(choice["node"])}

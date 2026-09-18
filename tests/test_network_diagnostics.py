@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import patch
 
-from codex_control_tower.network_diagnostics import _group_leaves, _selector_group, display_node_name
+from codex_control_tower.network_diagnostics import _codex_connection, _group_leaves, _selector_group, close_codex_connections, display_node_name
 
 
 class NetworkDiagnosticsTests(unittest.TestCase):
@@ -27,6 +28,22 @@ class NetworkDiagnosticsTests(unittest.TestCase):
     def test_node_display_removes_unsupported_symbol_prefix(self):
         self.assertEqual(display_node_name("🇸🇬新加坡02 | 推荐"), "新加坡02 | 推荐")
         self.assertEqual(display_node_name("🤖AI网站"), "AI网站")
+
+    def test_codex_connection_matches_only_official_domains(self):
+        self.assertTrue(_codex_connection({"metadata": {"host": "ios.chatgpt.com"}}))
+        self.assertTrue(_codex_connection({"metadata": {"host": "api.openai.com"}}))
+        self.assertFalse(_codex_connection({"metadata": {"host": "notopenai.com"}}))
+        self.assertFalse(_codex_connection({"metadata": {"host": "github.com"}}))
+
+    @patch("codex_control_tower.network_diagnostics.controller_request")
+    @patch("codex_control_tower.network_diagnostics.controller_json")
+    def test_reconnect_closes_only_codex_connections(self, controller_json, controller_request):
+        controller_json.return_value={"connections":[
+            {"id":"codex/id","metadata":{"host":"chatgpt.com"}},
+            {"id":"github","metadata":{"host":"github.com"}},
+        ]}
+        self.assertEqual(close_codex_connections(),["chatgpt.com"])
+        controller_request.assert_called_once_with("/connections/codex%2Fid",method="DELETE",timeout=2)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@
 - 支持 Mihomo TCP Controller 和 Clash Verge/Mihomo Party 使用的 Unix Socket Controller，控制密钥只在内存中读取和使用。
 - 手动测试当前线路的 3 MB 下载、128 KB 上传、TTFB、稳定性和失败率，结果在内存中缓存 10 分钟。
 - `Codex 加速`、`代码下载加速`、`模型下载加速`分别在对应 Mihomo 策略组中测试最多 12 个候选节点，并直接切换到目标服务延迟最低的节点。Codex 使用独立 AI 策略组；当前 GitHub 与 Hugging Face 共用主策略组，因此二者最后一次切换会覆盖前一次。
+- `Codex 加速` 提供“仅切换新连接”与“切换并重连 Codex”两种方式。后者在 Mihomo 确认新节点后，只按连接 ID 关闭 `openai.com` / `chatgpt.com` 的旧连接，不清空其他网络连接；可能中断当前正在生成的一轮，所以执行前需要二次确认。
 - `代码下载加速`以 GitHub 为测速目标，`模型下载加速`以 Hugging Face 为测速目标；界面会移除节点名称开头无法被 Qt 字体渲染的旗帜/Emoji，但切换时仍使用原始节点名称。
 
 ## 产品约束
