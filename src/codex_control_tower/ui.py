@@ -17,7 +17,7 @@ from .project_ideas import ProjectIdeaStore
 from .provider_routing import assert_independent_provider_home, ensure_provider_routing_patch
 from .selection_assistant import SOCKET_PATH, create_receiver, receive_requests, request_deepseek
 from .system_monitor import SystemMonitor
-from .theme import CANVAS, PAGE, SURFACE, app_stylesheet, badge_style, button_style, card_style, dialog_stylesheet, meta_style, panel_style, section_title_style
+from .theme import CANVAS, PAGE, SURFACE, app_stylesheet, badge_style, button_style, dialog_stylesheet, meta_style, panel_style, section_title_style
 from .vocabulary import VocabularyLibrary, VocabularyStore
 from .vscode_bridge import ensure_bridge_installed
 try:
@@ -924,7 +924,7 @@ class App(QWidget):
         hint=QLabel("自动监控运行状态 · 当前聚焦的窗口会自动标记为已查看"); hint.setStyleSheet("color:#64748b;font-size:11px"); v.addWidget(hint)
         for w in self.windows:
             unread=w["completed"]>self.seen.get(w["path"],0); state="运行结束，尚未查看" if unread else w["status"]
-            card=QFrame(); card.setObjectName("windowCard"); card.setStyleSheet(f"QFrame#windowCard{{{card_style('monitor',state=='正在运行')}}} QFrame#windowCard:hover{{border-color:#b9d4ec}} QFrame#windowCard QLabel{{background:transparent;border:0}}"); card_layout=QVBoxLayout(card); card_layout.setContentsMargins(12,10,10,10); card_layout.setSpacing(8); h=QHBoxLayout(); h.setSpacing(7)
+            card=QFrame(); card.setObjectName("windowCard"); card.setStyleSheet("QFrame#windowCard{background:#fffefa;border:1px solid #d7e6f3;border-radius:12px}"); card_layout=QVBoxLayout(card); card_layout.setContentsMargins(12,10,10,10); card_layout.setSpacing(8); h=QHBoxLayout(); h.setSpacing(6)
             dot=QLabel("●" if unread else ("●" if state=="正在运行" else "○")); dot.setStyleSheet(f"color:{'#e56f7c' if unread else ('#78a7e8' if state=='正在运行' else '#94a3b8')};font-size:18px"); h.addWidget(dot)
             info=QVBoxLayout(); name=QLabel(w["folder"]); name.setMinimumWidth(0); name.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred); name.setFont(QFont("Noto Sans CJK SC",14,QFont.Bold)); info.addWidget(name)
             meta=QHBoxLayout(); account=QLabel(w["account"]); account.setStyleSheet("color:#4338ca;background:#eef2ff;padding:3px 8px;border-radius:5px;font-size:12px"); meta.addWidget(account); status=QLabel("待查看" if unread else state); status.setStyleSheet(f"color:{'#b91c1c' if unread else '#475569'};background:{'#fee2e2' if unread else '#f1f5f9'};padding:3px 8px;border-radius:5px;font-weight:{'700' if unread else '500'};font-size:12px"); meta.addWidget(status); meta.addStretch(); info.addLayout(meta)
@@ -936,15 +936,17 @@ class App(QWidget):
             current_metrics=session_metrics(conversations[0]["file"]) if conversations else {}; current_total=current_metrics.get("total",{}); current_last=current_metrics.get("turn") or current_metrics.get("last",{}); context_percent=current_metrics.get("context_percent")
             metric_values=[]
             if conversations:
-                running=state=="正在运行"; time_start=current_metrics.get("turn_started_at") if running and current_metrics.get("turn_running") else current_metrics.get("started_at"); last_input=int(current_last.get("input_tokens") or 0); last_cached=int(current_last.get("cached_input_tokens") or 0); cache_hit=round(last_cached/last_input*100) if last_input else None; metric_values=[("上下文",f"约 {context_percent}%" if context_percent is not None else "--"),("缓存命中",f"{cache_hit}%" if cache_hit is not None else "--"),("运行时间",elapsed_label(time_start,current_metrics.get("updated_at"),running))]
-            more=QToolButton(); more.setText("更多"); more.setPopupMode(QToolButton.InstantPopup); more.setCursor(Qt.PointingHandCursor); more.setToolTip("对话详情、项目灵感和待办"); more.setStyleSheet(button_style("monitor")); more_menu=QMenu(more); detail_action=more_menu.addAction(f"对话详情 · {total_conversations}"); detail_action.triggered.connect(lambda _,x=w,rows=list(conversations):self.open_conversation_details(x,rows)); recent_menu=more_menu.addMenu("最近对话")
+                running=state=="正在运行"; time_start=current_metrics.get("turn_started_at") if running and current_metrics.get("turn_running") else current_metrics.get("started_at"); last_input=int(current_last.get("input_tokens") or 0); last_cached=int(current_last.get("cached_input_tokens") or 0); cache_hit=round(last_cached/last_input*100) if last_input else None; metric_values=[("上下文",f"约 {context_percent}%" if context_percent is not None else "--"),("缓存命中",f"{cache_hit}%" if cache_hit is not None else "--"),("本轮输入",compact_tokens(last_input)),("本轮输出",compact_tokens(current_last.get("output_tokens"))),("运行时间",elapsed_label(time_start,current_metrics.get("updated_at"),running))]
+            chats=QToolButton(); chats.setText(f"详情 {total_conversations}  ▾"); chats.setPopupMode(QToolButton.InstantPopup); chats.setCursor(Qt.PointingHandCursor); chats.setToolTip("查看当前对话数据和这个项目的其他对话"); chats.setStyleSheet(button_style("monitor"))
+            chat_menu=QMenu(chats); detail_action=chat_menu.addAction("查看对话数据"); detail_action.triggered.connect(lambda _,x=w,rows=list(conversations):self.open_conversation_details(x,rows)); caption=chat_menu.addAction(f"此项目最近对话 · 共 {total_conversations} 条"); caption.setEnabled(False)
+            if conversations:chat_menu.addSeparator()
             for conversation in conversations:
                 stamp=datetime.fromtimestamp(conversation["mtime"]).strftime("%m-%d %H:%M")
                 owner=conversation.get("provider","subscription"); source="Plus" if owner=="subscription" else api_profile_for(owner).get("name",owner)
-                action=recent_menu.addAction(f"{conversation['title']}    {source} · {stamp}"); action.setToolTip(conversation["title"]); action.triggered.connect(lambda _,x=w,c=conversation:self.open_owned_conversation(x,c))
-            if not conversations:empty=recent_menu.addAction("还没有本地对话"); empty.setEnabled(False)
-            if total_conversations>len(conversations):older=recent_menu.addAction(f"另有 {total_conversations-len(conversations)} 条较早对话"); older.setEnabled(False)
-            more_menu.addSeparator(); idea_action=more_menu.addAction(f"项目灵感 · {len(open_ideas)}" if open_ideas else "记录项目灵感"); idea_action.triggered.connect(lambda _,x=w:self.open_project_ideas(x)); todo_action=more_menu.addAction("加入我的待办"); todo_action.triggered.connect(lambda _,x=w:self.prefill_todo(x)); more.setMenu(more_menu)
+                action=chat_menu.addAction(f"{conversation['title']}    {source} · {stamp}"); action.setToolTip(conversation["title"]); action.triggered.connect(lambda _,x=w,c=conversation:self.open_owned_conversation(x,c))
+            if not conversations:empty=chat_menu.addAction("这个项目还没有本地对话"); empty.setEnabled(False)
+            if total_conversations>len(conversations):older=chat_menu.addAction(f"另外 {total_conversations-len(conversations)} 条较早对话暂未展开"); older.setEnabled(False)
+            chats.setMenu(chat_menu); chats.setMaximumWidth(86); h.addWidget(chats)
             pending=self.pending_accounts.get(w["id"]); selected_name=pending.get("name") if pending else w["account"]
             selector=QToolButton(); selector.setText(f"{selected_name}{' · 待切换' if pending else ''}"); selector.setPopupMode(QToolButton.InstantPopup); selector.setCursor(Qt.PointingHandCursor); selector.setStyleSheet("QToolButton{padding:7px 11px;background:#fff7ed;color:#c2410c;border:1px solid #fdba74;border-radius:7px;font-weight:700} QToolButton:hover{background:#ffedd5} QToolButton::menu-indicator{image:none}" if pending else "QToolButton{padding:7px 11px;background:#f8fafc;color:#334155;border:1px solid #dbe3ed;border-radius:7px} QToolButton:hover{background:#eef2ff;color:#4338ca;border-color:#a5b4fc} QToolButton::menu-indicator{image:none}")
             menu=QMenu(selector)
@@ -961,12 +963,14 @@ class App(QWidget):
                 api_action.setEnabled(api_profile.get("configured",False)); api_action.setToolTip("手动选择的独立 API 接口，不会自动接管 Plus")
                 api_action.triggered.connect(lambda _,x=w,p=api_profile:self.select_account(x,p))
             if not available and not any(p.get("configured") for p in api_profiles):disabled=menu.addAction("暂无可用账号"); disabled.setEnabled(False)
-            selector.setMenu(menu); selector.setToolTip("先选择账号，再点聚焦应用切换"); selector.setMaximumWidth(150); h.addWidget(selector); h.addWidget(more)
+            selector.setMenu(menu); selector.setToolTip("先选择账号，再点聚焦应用切换"); selector.setMaximumWidth(135); h.addWidget(selector)
+            ideas=QPushButton(f"灵感 {len(open_ideas)}" if open_ideas else "记灵感"); ideas.setToolTip("记录和管理这个项目暂未实现的想法"); ideas.setStyleSheet(button_style("learn")); ideas.clicked.connect(lambda _,x=w:self.open_project_ideas(x)); h.addWidget(ideas)
+            create=QPushButton("加待办"); create.setToolTip("把这个项目加入今日待办"); create.setStyleSheet("padding:7px 10px"); create.clicked.connect(lambda _,x=w:self.prefill_todo(x)); h.addWidget(create)
             focus=QPushButton("切换并聚焦" if pending else ("查看" if unread else "聚焦")); focus.setStyleSheet((button_style("todo",True) if pending else ("QPushButton{background:#d66f7b;color:white;border:0;border-radius:9px;font-weight:700} QPushButton:hover{background:#bf5e6a}" if unread else button_style("monitor",True)))); focus.clicked.connect(lambda _,x=w:self.focus(x["id"])); h.addWidget(focus); card_layout.addLayout(h)
             if metric_values:
-                strip=QFrame(); strip.setObjectName("tokenStrip"); strip.setStyleSheet("QFrame#tokenStrip{background:#f5f9fd;border:0;border-radius:8px} QLabel{background:transparent;border:0}"); metric_row=QHBoxLayout(strip); metric_row.setContentsMargins(10,7,10,7); metric_row.setSpacing(0)
+                strip=QFrame(); strip.setObjectName("tokenStrip"); strip.setStyleSheet("QFrame#tokenStrip{background:#f4f8fe;border:1px solid #e2ecf8;border-radius:7px} QLabel{background:transparent;border:0}"); metric_row=QHBoxLayout(strip); metric_row.setContentsMargins(10,6,10,6); metric_row.setSpacing(0)
                 for index,(label,value) in enumerate(metric_values):
-                    cell=QWidget(); cell_layout=QHBoxLayout(cell); cell_layout.setContentsMargins(9,0,9,0); cell_layout.setSpacing(6); caption=QLabel(label); caption.setStyleSheet("color:#738096;font-size:10px;font-weight:600"); number=QLabel(value); number.setStyleSheet("color:#4778b8;font-size:12px;font-weight:700"); cell_layout.addWidget(caption); cell_layout.addWidget(number); cell_layout.addStretch(); metric_row.addWidget(cell,1)
+                    cell=QWidget(); cell_layout=QHBoxLayout(cell); cell_layout.setContentsMargins(7,0,7,0); cell_layout.setSpacing(5); caption=QLabel(label); caption.setStyleSheet("color:#64748b;font-size:9px;font-weight:600"); number=QLabel(value); number.setStyleSheet("color:#4778b8;font-size:11px;font-weight:700"); cell_layout.addWidget(caption); cell_layout.addWidget(number); cell_layout.addStretch(); metric_row.addWidget(cell,1)
                     if index<len(metric_values)-1:divider=QFrame(); divider.setFixedWidth(1); divider.setStyleSheet("background:#dbeafe;border:0"); metric_row.addWidget(divider)
                 card_layout.addWidget(strip)
             v.addWidget(card)
@@ -997,16 +1001,15 @@ class App(QWidget):
                 text=f"{api.get('name')} · " + (f"剩余 {remaining:g}{usage.get('unit','')}" if isinstance(remaining,(int,float)) else "暂无用量接口")
                 label=QLabel(text); label.setStyleSheet("color:#0369a1;background:#e0f2fe;padding:3px 7px;border-radius:5px;font-size:10px;font-weight:600"); usage_row.addWidget(label)
             usage_row.addStretch(); v.addLayout(usage_row)
-        h=QGridLayout(); h.setHorizontalSpacing(7); h.setVerticalSpacing(7)
-        for profile_index,profile in enumerate(rows):
+        h=QHBoxLayout(); h.setSpacing(7)
+        for profile in rows:
             limits=profile.get("limits",{}); primary=limits.get("primary") or {}; secondary=limits.get("secondary") or {}
-            card=QFrame(); card.setObjectName("quotaCard"); card.setStyleSheet("QFrame#quotaCard{background:white;border:1px solid #dbe7e2;border-radius:9px} QFrame#quotaCard:hover{border-color:#bcd9cc} QLabel{background:transparent}"); c=QVBoxLayout(card); c.setContentsMargins(10,8,10,9); c.setSpacing(4); name_row=QHBoxLayout(); name=QLabel(profile.get("name","未命名")); name.setFont(QFont("Noto Sans CJK SC",11,QFont.Bold)); name.setStyleSheet("color:#273142"); name_row.addWidget(name,1); windows_count=sum(bool(window) for window in (primary,secondary)); window_badge=QLabel(f"{windows_count} 个周期"); window_badge.setStyleSheet("color:#64748b;background:#f1f5f9;padding:2px 5px;border-radius:4px;font-size:10px"); name_row.addWidget(window_badge); c.addLayout(name_row)
+            card=QFrame(); card.setObjectName("quotaCard"); card.setStyleSheet("QFrame#quotaCard{background:white;border:1px solid #dbe7e2;border-radius:8px} QLabel{background:transparent}"); c=QVBoxLayout(card); c.setContentsMargins(9,7,9,8); c.setSpacing(3); name_row=QHBoxLayout(); name=QLabel(profile.get("name","未命名")); name.setFont(QFont("Noto Sans CJK SC",11,QFont.Bold)); name.setStyleSheet("color:#0f172a"); name_row.addWidget(name,1); windows_count=sum(bool(window) for window in (primary,secondary)); window_badge=QLabel(f"{windows_count} 个额度周期"); window_badge.setStyleSheet("color:#64748b;background:#f1f5f9;padding:2px 5px;border-radius:4px;font-size:8px"); name_row.addWidget(window_badge); c.addLayout(name_row)
             for label,window in (("5 小时",primary),("每周",secondary)):
-                value=window.get("remainingPercent"); row=QHBoxLayout(); caption=QLabel(label); caption.setStyleSheet("color:#64748b;font-size:10px;font-weight:700"); row.addWidget(caption); row.addStretch(); number=QLabel(f"{value if value is not None else '--'}%"); number.setStyleSheet("color:#047857;font-size:11px;font-weight:700"); row.addWidget(number); c.addLayout(row); reset_text=f"{remaining_label(window.get('resetsAt'))} · {reset_label(window.get('resetsAt'))}"; reset=QLabel(reset_text); reset.setStyleSheet("color:#94a3b8;font-size:10px"); reset.setToolTip(f"{label}额度刷新：{reset_text}"); c.addWidget(reset); bar=QProgressBar(); bar.setTextVisible(False); bar.setRange(0,100); bar.setValue(value or 0); bar.setFixedHeight(5); c.addWidget(bar)
-            h.addWidget(card,profile_index//3,profile_index%3)
+                value=window.get("remainingPercent"); row=QHBoxLayout(); caption=QLabel(label); caption.setStyleSheet("color:#64748b;font-size:9px;font-weight:700"); row.addWidget(caption); row.addStretch(); number=QLabel(f"{value if value is not None else '--'}%"); number.setStyleSheet("color:#047857;font-size:10px;font-weight:700"); row.addWidget(number); c.addLayout(row); reset_text=f"{remaining_label(window.get('resetsAt'))} · {reset_label(window.get('resetsAt'))}"; reset=QLabel(reset_text); reset.setStyleSheet("color:#94a3b8;font-size:8px"); reset.setToolTip(f"{label}额度刷新：{reset_text}"); c.addWidget(reset); bar=QProgressBar(); bar.setTextVisible(False); bar.setRange(0,100); bar.setValue(value or 0); bar.setFixedHeight(5); c.addWidget(bar)
+            h.addWidget(card,1)
         if not rows:
-            empty=QLabel("暂未读取到账号额度"); empty.setAlignment(Qt.AlignCenter); empty.setStyleSheet("color:#94a3b8;padding:14px"); h.addWidget(empty,0,0,1,3)
-        for column in range(3):h.setColumnStretch(column,1)
+            empty=QLabel("暂未读取到账号额度"); empty.setAlignment(Qt.AlignCenter); empty.setStyleSheet("color:#94a3b8;padding:14px"); h.addWidget(empty,1)
         v.addLayout(h); self.box.addWidget(p)
     def learning_panel(self):
         panel=QFrame(); panel.setObjectName("learnPanel"); panel.setStyleSheet(panel_style("learn")); v=QVBoxLayout(panel); v.setContentsMargins(14,12,14,14); v.setSpacing(8)
