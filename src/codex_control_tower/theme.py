@@ -6,6 +6,7 @@ MUTED = "#7f8999"
 SURFACE = "#fffefa"
 CANVAS = "#fbfaf7"
 BORDER = "#e7ded5"
+HAIRLINE = "#eee9e3"
 
 PAGE = {
     "monitor": {"bg": "#f4f9ff", "border": "#dbe9f6", "accent": "#6f9fd2", "soft": "#e6f2ff", "ink": "#3f6f9e"},
@@ -24,12 +25,13 @@ def app_stylesheet():
     QScrollBar::handle:vertical {{ background:#d6d7dc; min-height:28px; border-radius:4px; }}
     QScrollBar::handle:vertical:hover {{ background:#bfc3ca; }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}
-    QPushButton, QToolButton {{ padding:7px 12px; background:{SURFACE}; border:1px solid {BORDER}; border-radius:9px; color:#465064; }}
-    QPushButton:hover, QToolButton:hover {{ background:#fff7ed; border-color:#d9cabe; }}
+    QPushButton, QToolButton {{ min-height:18px; padding:7px 12px; background:{SURFACE}; border:1px solid {BORDER}; border-radius:9px; color:#465064; }}
+    QPushButton:hover, QToolButton:hover {{ background:#fffaf5; border-color:#d9cabe; }}
     QPushButton:pressed, QToolButton:pressed {{ background:#f7eee5; }}
+    QPushButton:focus, QToolButton:focus {{ border-color:#9ec5e9; }}
     QPushButton:disabled, QToolButton:disabled {{ color:#a8adb6; background:#f5f2ee; border-color:#ece7e1; }}
     QToolButton::menu-indicator {{ image:none; }}
-    QLineEdit, QPlainTextEdit, QComboBox {{ padding:7px; background:{SURFACE}; border:1px solid {BORDER}; border-radius:9px; selection-background-color:#b9d8f5; }}
+    QLineEdit, QPlainTextEdit, QComboBox, QDateEdit {{ min-height:20px; padding:7px; background:{SURFACE}; border:1px solid {BORDER}; border-radius:9px; selection-background-color:#b9d8f5; }}
     QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus {{ border-color:#9ec5e9; }}
     QComboBox::drop-down {{ border:0; width:22px; }}
     QMenu {{ background:{SURFACE}; border:1px solid {BORDER}; border-radius:10px; padding:6px; }}
@@ -66,3 +68,18 @@ def button_style(name, primary=False):
 def badge_style(name):
     color = PAGE[name]
     return f"color:{color['ink']};background:{color['soft']};padding:4px 8px;border-radius:6px;font-size:10px;font-weight:700"
+
+
+def card_style(name, active=False):
+    color = PAGE[name]
+    left = f"border-left:4px solid {color['accent']};" if active else ""
+    return f"background:{SURFACE};border:1px solid {color['border']};{left}border-radius:11px"
+
+
+def meta_style(color=MUTED):
+    return f"color:{color};font-size:10px"
+
+
+def section_title_style(name):
+    color = PAGE[name]
+    return f"color:{color['ink']};font-size:11px;font-weight:700"
