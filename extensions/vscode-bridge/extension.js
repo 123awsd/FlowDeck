@@ -182,6 +182,10 @@ async function processRequests() {
     if (!belongsHere(request)) continue;
     try {
       if (request.action === 'ping') { result(request, { ok: true, at: Date.now() }); continue; }
+      if (request.action === 'refreshAccounts') {
+        await vscode.commands.executeCommand('codex-switch.profile.refresh');
+        result(request, { ok: true, phase: 'accounts_refreshed', at: Date.now() }); continue;
+      }
       if (request.action === 'reloadWindow') { result(request, { ok: true, at: Date.now() }); setTimeout(() => vscode.commands.executeCommand('workbench.action.reloadWindow'), 250); return; }
       if (request.action === 'openConversation') {
         if (!request.conversationId) throw new Error('缺少对话 ID');

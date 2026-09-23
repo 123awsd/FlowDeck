@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+from .conversation_ownership import discover_conversation_owners
 from .curriculum import CurriculumLibrary, CurriculumStore, PATH_LABELS, STATE_LABELS
 from .conversation_metrics import compact_tokens, daily_token_usage, elapsed_label, session_metrics
 from .lessons import LessonChatStore, LessonStore, ask_lesson_tutor, generate_lesson
@@ -45,6 +46,10 @@ _SESSION_STREAMS={}
 _CONVERSATION_TITLES={}
 _LAST_BRIDGE_CLEANUP=0
 _API_USAGE_CACHE={}
+
+def version_at_least(value,minimum):
+    try:return tuple(int(part) for part in value.split("."))>=tuple(int(part) for part in minimum.split("."))
+    except (AttributeError,ValueError):return False
 
 def run_cancellable_audio(args,cancel,timeout=15):
     try:process=subprocess.Popen(args,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
@@ -162,6 +167,36 @@ def api_usage(profile):
         result={"remaining":data.get("remaining"),"unit":data.get("unit",""),"usage":data.get("usage") or {}}
     except Exception: result=None
     _API_USAGE_CACHE[key]=(now,result); return result
+
+def refresh_accounts_via_bridge(windows,timeout=45):
+    """Ask one current subscription host to refresh every Codex Switch profile."""
+    target=next((window for window in windows if window.get("provider")=="subscription" and window.get("verified") and version_at_least(window.get("bridge_version"),"0.2.1") and window.get("bridge_pid")),None)
+    if not target:return {"status":"cached","message":"额度沿用本地缓存；重载任一 VS Code 窗口后即可主动刷新"}
+    request_id=str(uuid.uuid4()); requests=BRIDGE_DIR/"requests"; results=BRIDGE_DIR/"results"; requests.mkdir(parents=True,exist_ok=True); results.mkdir(parents=True,exist_ok=True)
+    payload={"id":request_id,"action":"refreshAccounts","targetPath":target.get("path",""),"targetBridgePid":target["bridge_pid"]}
+    request_file=requests/f"{request_id}.json"; result_file=results/f"{request_id}.json"; request_file.write_text(json.dumps(payload,ensure_ascii=False),encoding="utf-8")
+    deadline=time.monotonic()+timeout
+    while time.monotonic()<deadline:
+        if result_file.exists():
+            try:result=json.loads(result_file.read_text(encoding="utf-8"))
+            except (OSError,ValueError):result={"ok":False,"error":"额度刷新结果损坏"}
+            result_file.unlink(missing_ok=True)
+            return {"status":"ok" if result.get("ok") else "failed","message":result.get("error") or "Codex Switch 额度已刷新"}
+        time.sleep(.2)
+    request_file.unlink(missing_ok=True)
+    return {"status":"failed","message":"Codex Switch 额度刷新超时，其他状态仍已同步"}
+
+def full_status_sync(windows):
+    quota=refresh_accounts_via_bridge(windows)
+    _API_USAGE_CACHE.clear()
+    for profile in api_provider_profiles():
+        if profile.get("configured"):api_usage(profile)
+    refreshed=scan(); conversation_ids=set()
+    for window in refreshed:
+        conversations,_=project_conversations(window.get("path",""),1)
+        if conversations:conversation_ids.add(conversations[0].get("id"))
+    owners=discover_conversation_owners(conversation_ids,live_paths={window.get("path","") for window in refreshed})
+    return {"windows":refreshed,"owners":owners,"quota":quota}
 
 def select_bridge_info(path,folder,rows):
     """Prefer live bridge identity over ambiguous VS Code workspace history."""
@@ -397,7 +432,7 @@ def scan():
         provider_profile=api_profile_for(provider)
         account=provider_profile.get("name",provider) if provider!="subscription" else (session_account or profile.get("name","未知账号"))
         scope="API 服务商" if provider!="subscription" else ("最近请求" if session_account else ("工作区" if workspace_id else "插件当前"))
-        out.append(dict(id=wid,pid=pid,bridge_pid=bridge_info.get("pid"),session_id=bridge_info.get("sessionId",""),verified=bridge_info.get("verified",False),title=title,folder=name,path=path,account=account,account_scope=scope,status=status,completed=completed,provider=provider))
+        out.append(dict(id=wid,pid=pid,bridge_pid=bridge_info.get("pid"),bridge_version=bridge_info.get("bridgeVersion",""),session_id=bridge_info.get("sessionId",""),verified=bridge_info.get("verified",False),title=title,folder=name,path=path,account=account,account_scope=scope,status=status,completed=completed,provider=provider))
     return out
 
 def active_window_id():
@@ -688,7 +723,7 @@ class App(QWidget):
         self.tasks=self.load(); self.todos=self.load_todos(); self.idea_store=ProjectIdeaStore(); self.view_mode="monitor"; self.windows=[]; self.expanded=False
         self.show_later_todos=False; self.show_todo_review=False; self.todo_archive_expanded=set(); self.todo_drag_ghost=None; self.todo_drag_indicator=None; self.todo_drag_source=None; self.todo_drag_offset=QPoint(); self.todo_drag_target=0; self.todo_drag_preview_index=0; self.todo_drag_layout=None; self.todo_reorder_animation=None; self.todo_snap_animation=None
         self.pending_accounts={}; self.pending_focus={}; self.pending_opens={}; self.pending_bridge_recovery={}; self.pending_conversation_after_switch={}
-        self.window_executor=ThreadPoolExecutor(max_workers=1); self.window_future=None; self.window_refresh_force=False; self.window_refresh_before=None
+        self.window_executor=ThreadPoolExecutor(max_workers=1); self.window_future=None; self.window_refresh_force=False; self.window_refresh_before=None; self.sync_future=None; self.sync_started_at=0; self.last_sync_at=None; self.sync_note=""; self.conversation_owners={}
         self.feed_error=""; self.feed_future=None; self.feed_executor=ThreadPoolExecutor(max_workers=1)
         self.feed_store=LearningStore(); self.feed_display_limit=6; self.feed_items=self.feed_store.recent(self.feed_display_limit); self.feed_stats=self.feed_store.stats()
         self.learning_context={"label":"具身智能前沿","terms":[],"topics":[]}; self.learning_mode="frontier"
@@ -709,7 +744,7 @@ class App(QWidget):
         for mode,button in (("monitor",self.monitor_tab),("todo",self.todo_tab),("learn",self.learn_tab),("system",self.system_tab)):
             button.setToolTip({"monitor":"任务监控","todo":"今日待办","learn":"等待学习","system":"系统监控"}[mode]); button.setIcon(QIcon(str(ASSETS_DIR/f"icons/{mode}.svg"))); button.setIconSize(QSize(16,16)); button.setCheckable(True); button.setCursor(Qt.PointingHandCursor); button.clicked.connect(lambda _,m=mode:self.switch_view(m)); h.addWidget(button)
         self.summary=QLabel(); self.summary.setMinimumWidth(0); self.summary.setStyleSheet("color:#667085;border:0;font-size:11px"); h.addWidget(self.summary,1)
-        scan_btn=QPushButton("刷新"); scan_btn.setToolTip("立即扫描 VS Code"); scan_btn.setStyleSheet("QPushButton{background:#f3f7fb;color:#52708f;border:1px solid #dbe7f1;border-radius:9px;padding:6px 11px;font-weight:700} QPushButton:hover{background:#eaf3fb}"); scan_btn.clicked.connect(lambda _=False:self.schedule_window_refresh(True)); h.addWidget(scan_btn)
+        self.sync_button=QPushButton("同步"); self.sync_button.setToolTip("刷新窗口、账号额度、API 余额和对话执行位置"); self.sync_button.setStyleSheet("QPushButton{background:#f3f7fb;color:#52708f;border:1px solid #dbe7f1;border-radius:9px;padding:6px 11px;font-weight:700} QPushButton:hover{background:#eaf3fb} QPushButton:disabled{background:#eef2f5;color:#8b96a5}"); self.sync_button.clicked.connect(self.start_full_sync); h.addWidget(self.sync_button)
         controls=(("—","缩成悬浮球",self.collapse),("□","最大化 / 还原",self.toggle_maximize),("×","关闭",self.close))
         for text,tip,fn in controls:
             button=QPushButton(text); button.setFixedSize(32,30); button.setToolTip(tip); button.setStyleSheet("QPushButton{padding:0;background:transparent;border:0;border-radius:9px;font-size:16px;color:#667085} QPushButton:hover{background:#f1ece7}" if text!="×" else "QPushButton{padding:0;background:transparent;border:0;border-radius:9px;font-size:18px;color:#667085} QPushButton:hover{background:#fff0f1;color:#c96672}"); button.clicked.connect(fn); h.addWidget(button)
@@ -741,7 +776,25 @@ class App(QWidget):
         for mode,button in (("monitor",self.monitor_tab),("todo",self.todo_tab),("learn",self.learn_tab),("system",self.system_tab)):
             fill,text,border=palettes[mode]; button.setChecked(self.view_mode==mode); button.setStyleSheet(f"QPushButton{{padding:6px 11px;background:{fill if self.view_mode==mode else '#fffdf9'};color:{text if self.view_mode==mode else '#657083'};border:1px solid {border if self.view_mode==mode else 'transparent'};border-radius:9px;font-weight:{'700' if self.view_mode==mode else '500'}}} QPushButton:hover{{background:{fill};color:{text}}}")
     def periodic_refresh(self):
+        if self.sync_future and not self.sync_future.done():return
         self.schedule_window_refresh(False)
+    def start_full_sync(self):
+        if self.sync_future and not self.sync_future.done():return
+        self.sync_started_at=time.monotonic(); self.sync_note="正在刷新窗口、额度和执行位置"; self.sync_button.setText("同步中…"); self.sync_button.setEnabled(False); self.sync_button.setToolTip(self.sync_note)
+        self.sync_future=self.window_executor.submit(full_status_sync,list(self.windows)); QTimer.singleShot(80,self.poll_full_sync)
+    def poll_full_sync(self):
+        if not self.sync_future:return
+        if not self.sync_future.done():QTimer.singleShot(80,self.poll_full_sync); return
+        try:
+            result=self.sync_future.result(); self.windows=result["windows"]; self.conversation_owners=result["owners"]; quota=result["quota"]; self.apply_active_window_seen(); self.last_sync_at=datetime.now(); elapsed=max(.1,time.monotonic()-self.sync_started_at)
+            if quota.get("status")=="ok":self.sync_note=f"全部状态已同步 · 用时 {elapsed:.1f} 秒"; button_text="已同步"
+            else:self.sync_note=f"窗口、API 和执行位置已同步；{quota.get('message','额度沿用缓存')}"; button_text="部分同步"
+        except Exception as error:
+            self.sync_note=f"同步失败：{error}"; button_text="同步失败"
+        self.sync_future=None; self.refresh(render=True,scan_windows=False); self.sync_button.setText(button_text); self.sync_button.setEnabled(True); self.sync_button.setToolTip(self.sync_note); QTimer.singleShot(1800,self.reset_sync_button)
+    def reset_sync_button(self):
+        if self.sync_future:return
+        self.sync_button.setText("同步"); self.sync_button.setToolTip(self.sync_note or "刷新窗口、账号额度、API 余额和对话执行位置")
     def schedule_window_refresh(self,force_render=False):
         if self.window_future and not self.window_future.done():self.window_refresh_force=self.window_refresh_force or force_render; return
         self.window_refresh_before=(getattr(self,"running_count",0),getattr(self,"done_count",0),sum(w.get("completed",0)>self.seen.get(w.get("path",""),0) for w in self.windows)); self.window_refresh_force=force_render; self.window_future=self.window_executor.submit(scan); QTimer.singleShot(40,self.poll_window_refresh)
@@ -921,7 +974,7 @@ class App(QWidget):
     def window_panel(self):
         p=QFrame(); p.setObjectName("monitorPanel"); p.setStyleSheet(panel_style("monitor")); v=QVBoxLayout(p); v.setContentsMargins(14,12,14,14); v.setSpacing(8)
         head=QHBoxLayout(); heading=QLabel("项目窗口"); heading.setFont(QFont("Noto Sans CJK SC",15,QFont.Bold)); heading.setStyleSheet("color:#0f172a"); head.addWidget(heading); head.addStretch(); running=QLabel(f"●  正在运行 {self.running_count}"); running.setStyleSheet("color:#4778b8;background:#eaf3ff;padding:4px 9px;border-radius:6px;font-size:11px;font-weight:700"); head.addWidget(running); done=QLabel(f"✓  已完成 {self.done_count}"); done.setStyleSheet("color:#3f8a70;background:#e9f7f0;padding:4px 9px;border-radius:6px;font-size:11px;font-weight:700"); head.addWidget(done); v.addLayout(head)
-        hint=QLabel("自动监控运行状态 · 当前聚焦的窗口会自动标记为已查看"); hint.setStyleSheet("color:#64748b;font-size:11px"); v.addWidget(hint)
+        sync_text=f" · 上次同步 {self.last_sync_at:%H:%M:%S}" if self.last_sync_at else ""; hint=QLabel("自动监控运行状态 · 当前聚焦的窗口会自动标记为已查看"+sync_text); hint.setToolTip(self.sync_note); hint.setStyleSheet("color:#64748b;font-size:11px"); v.addWidget(hint)
         for w in self.windows:
             unread=w["completed"]>self.seen.get(w["path"],0); state="运行结束，尚未查看" if unread else w["status"]
             card=QFrame(); card.setObjectName("windowCard"); card.setStyleSheet("QFrame#windowCard{background:#fffefa;border:1px solid #d7e6f3;border-radius:12px}"); card_layout=QVBoxLayout(card); card_layout.setContentsMargins(12,10,10,10); card_layout.setSpacing(8); h=QHBoxLayout(); h.setSpacing(6)
@@ -933,6 +986,9 @@ class App(QWidget):
                 preview=QLabel("灵感 · "+open_ideas[0].get("text","")[:72]); preview.setMinimumWidth(0); preview.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred); preview.setToolTip(open_ideas[0].get("text","")); preview.setStyleSheet("color:#75659e;font-size:10px"); info.addWidget(preview)
             h.addLayout(info,1)
             conversations,total_conversations=project_conversations(w["path"])
+            current_conversation_id=conversations[0].get("id") if conversations else ""; execution_owner=self.conversation_owners.get(current_conversation_id,{}); owner_path=execution_owner.get("path","")
+            if owner_path and owner_path!=w.get("path"):
+                owner_window=next((item for item in self.windows if item.get("path")==owner_path),{}); owner_name=owner_window.get("folder") or Path(owner_path).name; owner_account=owner_window.get("account") or "未知账号"; warning=QLabel(f"注意：当前对话实际由 {owner_name} 执行 · {owner_account}"); warning.setWordWrap(True); warning.setToolTip("在另一个窗口打开同一对话时，请求会由 owner 窗口的账号执行"); warning.setStyleSheet("color:#a35d35;background:#fff4e7;padding:4px 7px;border-radius:6px;font-size:10px;font-weight:700"); info.addWidget(warning)
             current_metrics=session_metrics(conversations[0]["file"]) if conversations else {}; current_total=current_metrics.get("total",{}); current_last=current_metrics.get("turn") or current_metrics.get("last",{}); context_percent=current_metrics.get("context_percent")
             metric_values=[]
             if conversations:
@@ -1568,7 +1624,7 @@ class App(QWidget):
                 if ready.name.startswith("ready-active-"):
                     active=info.get("activeFile","")
                     if not active or not (active==w["path"] or active.startswith(w["path"].rstrip("/")+"/")):continue
-                if provider_switch and info.get("bridgeVersion")!="0.2.0":continue
+                if provider_switch and not version_at_least(info.get("bridgeVersion"),"0.2.0"):continue
                 return True
             except Exception:pass
         return False
