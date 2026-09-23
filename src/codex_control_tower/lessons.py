@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime
 from pathlib import Path
-from urllib.request import Request, urlopen
 
-from .paths import DATA_DIR, ENV_FILE
+from .ai_client import chat_completion
+from .paths import DATA_DIR
 
 
 LESSON_CACHE_FILE = DATA_DIR / "curriculum_lessons.json"
@@ -23,19 +22,6 @@ def _read_json(path: Path, default):
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return default
-
-
-def _env(name: str):
-    if os.environ.get(name):
-        return os.environ[name]
-    try:
-        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
-            key, separator, value = line.partition("=")
-            if separator and key.strip() == name:
-                return value.strip().strip('"').strip("'")
-    except Exception:
-        pass
-    return ""
 
 
 def lesson_key(bundle, concept_id: str):
@@ -151,9 +137,6 @@ class LessonChatStore:
 
 def ask_lesson_tutor(bundle, concept, lesson, history, question):
     """Answer one scoped follow-up without sending unrelated local information."""
-    key = _env("DEEPSEEK_API_KEY")
-    if not key:
-        raise RuntimeError("未配置 DeepSeek API Key")
     source_by_id = bundle.get("source_by_id", {})
     context = {
         "concept": {
@@ -180,32 +163,16 @@ def ask_lesson_tutor(bundle, concept, lesson, history, question):
         if row.get("role") in {"user", "assistant"} and row.get("content"):
             messages.append({"role": row["role"], "content": row["content"]})
     messages.append({"role": "user", "content": question})
-    payload = {
-        "model": "deepseek-v4-flash",
-        "messages": messages,
-        "thinking": {"type": "disabled"},
-        "temperature": 0.25,
-        "max_tokens": 1400,
-        "stream": False,
-    }
-    request = Request(
-        "https://api.deepseek.com/chat/completions",
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", "Authorization": "Bearer " + key},
+    return chat_completion(
+        messages,
+        temperature=0.25,
+        max_tokens=1400,
+        timeout=60,
     )
-    response = json.loads(urlopen(request, timeout=60).read())
-    answer = response["choices"][0]["message"]["content"].strip()
-    if not answer:
-        raise RuntimeError("AI 没有返回内容")
-    return answer
 
 
 def generate_lesson(bundle, concept):
     """Generate one compact teaching lesson; called only from a worker thread."""
-    key = _env("DEEPSEEK_API_KEY")
-    if not key:
-        raise RuntimeError("未配置 DeepSeek API Key")
-
     concept_by_id = bundle.get("concept_by_id", {})
     source_by_id = bundle.get("source_by_id", {})
     evidence = {
@@ -247,47 +214,25 @@ JSON 结构：
 
 课程证据：
 """ + json.dumps(evidence, ensure_ascii=False)
-    payload = {
-        "model": "deepseek-v4-flash",
-        "messages": [
+    messages = [
             {"role": "system", "content": "只输出合法 JSON；用简体中文进行准确、具体、循序渐进的教学。"},
             {"role": "user", "content": prompt},
-        ],
-        "thinking": {"type": "disabled"},
-        "temperature": 0.2,
-        "max_tokens": 3200,
-        "stream": False,
-        "response_format": {"type": "json_object"},
-    }
-    request = Request(
-        "https://api.deepseek.com/chat/completions",
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", "Authorization": "Bearer " + key},
-    )
-    response = json.loads(urlopen(request, timeout=60).read())
-    text = response["choices"][0]["message"]["content"].strip()
+    ]
+    text = chat_completion(messages, temperature=0.2, max_tokens=3200, timeout=60, json_object=True)
     try:
         lesson = _parse_json_object(text)
     except Exception:
-        repair_payload = {
-            "model": "deepseek-v4-flash",
-            "messages": [
+        repaired = chat_completion(
+            [
                 {"role": "system", "content": "你是 JSON 修复器，只输出一个合法 JSON 对象，不增删原意。"},
                 {"role": "user", "content": "把下面内容修复为合法 JSON：\n" + text},
             ],
-            "thinking": {"type": "disabled"},
-            "temperature": 0,
-            "max_tokens": 3200,
-            "stream": False,
-            "response_format": {"type": "json_object"},
-        }
-        repair_request = Request(
-            "https://api.deepseek.com/chat/completions",
-            data=json.dumps(repair_payload).encode(),
-            headers={"Content-Type": "application/json", "Authorization": "Bearer " + key},
+            temperature=0,
+            max_tokens=3200,
+            timeout=60,
+            json_object=True,
         )
-        repaired = json.loads(urlopen(repair_request, timeout=60).read())
-        lesson = _parse_json_object(repaired["choices"][0]["message"]["content"])
+        lesson = _parse_json_object(repaired)
     if not validate_lesson(lesson):
         raise RuntimeError("模型返回的微课结构不完整")
     return lesson

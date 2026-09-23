@@ -130,7 +130,7 @@ learning/
 - `domains/`：长期知识资产，进入 Git；
 - `inbox/`：待人工判断的候选补丁；
 - 个人进度、反馈、复习队列和缓存统一保存到仓库现有的 `data/`，并加入 `.gitignore`；
-- API Key 始终位于 `.env`。
+- AI 服务商由 `.env` 中的 `AI_PROVIDER` 选择，支持 DeepSeek 与千问；两家 API Key 始终只位于 `.env`，可以同时保存以便一行切换。
 
 ## Curriculum 编译交付契约
 

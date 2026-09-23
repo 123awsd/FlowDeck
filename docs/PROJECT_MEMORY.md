@@ -1,6 +1,6 @@
 # 项目长期记忆
 
-最后更新：2026-09-08
+最后更新：2026-09-23
 
 这份文件是项目的稳定上下文和专题文档索引。它解决“更换 Codex 对话或几个月后继续开发时，不能只依赖聊天记忆”的问题。
 
@@ -16,7 +16,7 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 | --- | --- | --- | --- |
 | 悬浮窗与导航 | 已实现 | 置顶悬浮球、展开/收起、四个主页面 | `src/codex_control_tower/ui.py` |
 | VS Code 窗口监控 | 已实现 | 自动发现本地和 SSH 窗口、项目、运行/完成状态、当前对话 Token 摘要、待查看提醒和聚焦 | `src/codex_control_tower/ui.py`、`src/codex_control_tower/conversation_metrics.py`、`extensions/vscode-bridge/` |
-| 账号与额度 | 已实现 | 读取 Codex Switch 账号和额度周期，过滤无额度账号，切换后聚焦目标窗口 | `src/codex_control_tower/ui.py`、`extensions/vscode-bridge/` |
+| 账号与额度 | 已实现 | 优先读取 Codex Switch 账号和额度；无 Switch 时从官方本地登录显示单账号名称或邮箱 | `src/codex_control_tower/ui.py`、`src/codex_control_tower/account_identity.py`、`extensions/vscode-bridge/` |
 | 今日待办 | 已实现 | 本地待办、并行激活、编辑、优先级、当日完成进度、系统中文输入法 | `src/codex_control_tower/ui.py` |
 | 项目灵感 | 已实现 | 按 VS Code 项目记录、预览、编辑和处理暂未实现的想法 | `src/codex_control_tower/project_ideas.py`、`src/codex_control_tower/ui.py` |
 | 系统监控 | 已实现 | CPU、内存、Swap、GPU/显存、网络速度/网卡/代理摘要、磁盘和高占用进程 | `src/codex_control_tower/system_monitor.py`、`src/codex_control_tower/ui.py` |
@@ -34,12 +34,15 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 - 系统学习页面使用中性名称“系统学习”，不在明显位置出现“面试”“求职”“目标岗位”等字样。
 - 个人偏好、项目路径、对话标题和学习进度默认只留在本机。
 - 密钥仅放在被 Git 忽略的 `.env` 中。
+- 摘要、微课、学习助教和选区助手共用同一 AI 服务商配置；`.env` 中通过 `AI_PROVIDER=deepseek|qwen` 选择，允许同时保存两家密钥以便只改一行切换。
+- 快捷翻译/解释气泡对短文本保持紧凑，对长结果自动扩展；窗口必须可从标题栏拖动、从右下角自由拉伸，不能强迫用户只在固定小窗内逐段滚动。
 
 ### VS Code 与账号
 
 - 每个 VS Code 窗口应自动识别其文件夹；本地与 Remote SSH 都属于正常使用场景。
 - 当前已经聚焦的窗口不应继续显示为“待查看”。
 - 账号切换采用“选择目标账号 → 切换并聚焦”，并过滤明确没有额度的账号。
+- 没有 Codex Switch 配置时，只读解析 `~/.codex/auth.json` 的本地 ChatGPT JWT，优先显示名称、其次显示邮箱；5 小时/每周额度从最近官方会话的 `token_count.rate_limits` 快照读取，不解析对话正文。这是单账号回退，不提供切换，不读取 API Key 登录，且不得记录或上传原始 Token。
 - 本地桥接需以 VSIX 正常安装并随仓库版本自动更新。Plus 账号之间由 Codex Switch 在目标窗口内切换；Plus 与 API 保留原 VS Code 窗口，以“会话 ID + 工作区指纹 + 扩展宿主 PID”定位，并在读取真实 Codex 子进程环境验证成功后才提交状态。
 - 每个账号来源必须使用完全独立的可写 `CODEX_HOME`；禁止跨运行时共享 SQLite/WAL、IPC、锁、日志、附件或会话目录。历史只做只读聚合。
 - 窗口发现必须优先信任桥接实时上报的路径；同名本地、SSH、Dev Container 工作区不能从 `workspaceStorage` 中取第一个名称匹配项。
@@ -75,6 +78,7 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 - 猫猫 PNG 和三套内置词库经用户确认来自其自有项目 `123awsd/win-floating-vocab`，允许在本项目复用；不引入原项目的第二套窗口运行时。
 - 单词页支持仅在该页面生效的键盘操作；朗读优先复用 `Alt+Q` 的本机 Piper 服务与声音，失败时依次退回在线 Edge 和 eSpeak，临时音频不累积。
 - 单词切换后自动朗读；旧播放必须可取消，并在快速连续切词时只朗读最终停留的单词，不能出现音画不同步。
+- 单词闪卡只允许从界面删除用户导入的本地词库副本，内置词库不可删除；删除不清理下载源文件或历史学习状态。
 
 完整设计见 [视觉系统](VISUAL_SYSTEM.md)、[工作与灵感管理](WORK_MANAGEMENT.md)、[账号与 API 服务商切换](ACCOUNT_PROVIDERS.md)、[对话与网络可观测性](OBSERVABILITY.md)、[领域学习系统](LEARNING_SYSTEM.md) 和 [单词闪卡](VOCABULARY.md)。
 
@@ -95,6 +99,8 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 
 ## 记忆更新记录
 
+- 2026-09-23：快捷翻译/解释气泡改为可拖动、可拉伸；长结果按实际换行高度和当前屏幕自动扩展，滚动仅用于超过屏幕上限的内容。
+- 2026-09-21：增加官方 Codex 单账号显示回退；无 Codex Switch 时只读本地 ChatGPT JWT 的名称或邮箱，并从最近官方会话快照显示 5 小时/每周额度，保持认证、路由、对话内容和原始 Token 不变。
 - 2026-09-06：建立仓库级长期记忆机制；记录领域学习系统、现有功能约束与后续 VLA 交付流程。
 - 2026-09-06：按源码、配置、运行数据、测试、扩展和打包资源重新整理仓库；根目录 `launch.sh` 保持为稳定入口。
 - 2026-09-06：导入网页版 GPT 生成的 VLA v1（18 个来源、7 个模块、39 个节点）；自动校验通过，并加入系统学习预览、路线和本地进度功能，暂不替用户冻结框架。
@@ -122,3 +128,5 @@ Codex Control Tower 是一个本地、常驻置顶的简体中文桌面工具，
 - 2026-09-11：VS Code/远程窗口的 5 秒周期扫描移出 UI 主线程；扫描期间界面保持可交互，完成后再合并最新状态。
 - 2026-09-11：页签切换不再同步扫描 VS Code；任务页先渲染已缓存的窗口快照，再由后台扫描校正，避免从待办返回时阻塞 UI。
 - 2026-09-11：今日待办拖动使用跟手快照、实时占位换序、其他卡片短让位动画、边缘自动滚动和松手吸附；仅在跨过任务中线时启动有限数量动画，临时元素在拖动后释放，松手只写盘一次。
+- 2026-09-20：将摘要、微课、学习助教和选区助手收敛到统一 OpenAI 兼容客户端；支持通过 `.env` 的 `AI_PROVIDER` 在 DeepSeek 与千问间切换，并保留服务商独立密钥、模型和端点覆盖。
+- 2026-09-20：单词闪卡增加导入词库删除按钮；仅删除用户词库目录中的 TXT 副本，确认后自动切换到内置词库。
