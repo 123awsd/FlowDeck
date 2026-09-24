@@ -67,12 +67,13 @@ def parse_vocabulary(path):
 
 
 class VocabularyLibrary:
-    def __init__(self):
-        USER_VOCAB_DIR.mkdir(parents=True,exist_ok=True); self._cache={}
+    def __init__(self,builtin_dir=BUILTIN_VOCAB_DIR,user_dir=USER_VOCAB_DIR):
+        self.builtin_dir=Path(builtin_dir); self.user_dir=Path(user_dir)
+        self.user_dir.mkdir(parents=True,exist_ok=True); self._cache={}
 
     def lexicons(self):
         found={}
-        for directory,builtin in ((BUILTIN_VOCAB_DIR,True),(USER_VOCAB_DIR,False)):
+        for directory,builtin in ((self.builtin_dir,True),(self.user_dir,False)):
             if not directory.exists():continue
             for path in sorted(directory.glob("*.txt")):
                 try:count=len(self.load(path))
@@ -92,10 +93,21 @@ class VocabularyLibrary:
         source=Path(source)
         if source.suffix.lower()!=".txt":raise ValueError("目前只支持 UTF-8 TXT 词库")
         if not parse_vocabulary(source):raise ValueError("没有识别到有效词条，请检查分隔格式和 UTF-8 编码")
-        target=USER_VOCAB_DIR/source.name; index=2
-        while target.exists() and target.read_bytes()!=source.read_bytes():target=USER_VOCAB_DIR/f"{source.stem}-{index}{source.suffix}"; index+=1
+        target=self.user_dir/source.name; index=2
+        while target.exists() and target.read_bytes()!=source.read_bytes():target=self.user_dir/f"{source.stem}-{index}{source.suffix}"; index+=1
         if not target.exists():shutil.copy2(source,target)
         self._cache.pop(str(target),None); return target.stem
+
+    def delete_imported(self,lexicon_id):
+        item=self.get(lexicon_id)
+        if not item:raise ValueError("没有找到要删除的词库")
+        if item["builtin"]:raise ValueError("内置词库不能删除")
+        path=Path(item["path"]); resolved=path.resolve()
+        if resolved.parent!=self.user_dir.resolve() or path.suffix.lower()!=".txt":
+            raise ValueError("只能删除用户词库目录中的 TXT 文件")
+        path.unlink()
+        self._cache.pop(str(path),None)
+        return item["name"]
 
 
 class VocabularyStore:
