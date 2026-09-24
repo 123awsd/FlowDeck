@@ -1,6 +1,6 @@
 # 账号与 API 服务商切换
 
-最后更新：2026-09-07
+最后更新：2026-09-24
 
 ## 已实现（安全路由 v2）
 
@@ -8,6 +8,8 @@ Control Tower 同时支持两类 Codex 认证来源：
 
 - Codex Switch 管理的 ChatGPT Plus 订阅账号；
 - 手动选择的一个或多个第三方兼容 Responses API，当前配置示例显示为“备用 API”。
+
+没有 Codex Switch 账号配置时，Control Tower 可只读显示官方 Codex 本地 ChatGPT 登录的名称/邮箱，并从最近本地会话的 `token_count.rate_limits` 快照读取额度。该模式不提供切换，不读取对话正文，不显示或记录原始 JWT，API Key 登录不会走此回退。
 
 备用 API 不会在 Plus 额度用完时静默接管。用户必须在指定 VS Code 窗口的账号菜单中手动选择，再点“切换并聚焦”。切回任意 Plus 账号时，目标窗口先恢复默认 Codex 目录，再交给 Codex Switch 激活订阅账号。
 
@@ -62,6 +64,7 @@ Control Tower 同时支持两类 Codex 认证来源：
 
 ## 修复记录
 
+- 2026-09-24：增加无 Codex Switch 时的官方 Codex 本地单账号显示回退，仅解析显示字段和额度快照。
 - 2026-09-07：将 Heju 与 FastLab 密钥持久化到各自独立的本地 `auth.json`，并把“API 已配置”从文件存在检查升级为 API Key 认证状态检查，避免 ChatGPT OAuth 文件被误判为可用 API。
 - 2026-09-07：修复同名本地与容器工作区导致的桥接恢复超时。恢复状态改为按窗口 ID 隔离，重载请求绑定扩展宿主 PID，实时桥接路径覆盖含糊的历史路径。
 - 2026-09-23：桥接升级至 0.2.1，增加由 Control Tower 发起的 Codex Switch 额度刷新；首页“刷新”升级为有进度反馈的完整状态同步，并增加跨窗口对话 owner 检测。

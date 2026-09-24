@@ -7,6 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+from .account_identity import native_codex_account, native_codex_quota_profile, subscription_identity
+from .ai_client import active_provider_label
 from .conversation_ownership import discover_conversation_owners
 from .curriculum import CurriculumLibrary, CurriculumStore, PATH_LABELS, STATE_LABELS
 from .conversation_metrics import compact_tokens, daily_token_usage, elapsed_label, session_metrics
@@ -16,7 +18,7 @@ from .network_diagnostics import benchmark_current_route, diagnose_network, disp
 from .paths import ASSETS_DIR, DATA_DIR, PROJECT_ROOT
 from .project_ideas import ProjectIdeaStore
 from .provider_routing import assert_independent_provider_home, ensure_provider_routing_patch
-from .selection_assistant import SOCKET_PATH, create_receiver, receive_requests, request_deepseek
+from .selection_assistant import SOCKET_PATH, create_receiver, receive_requests, request_ai
 from .system_monitor import SystemMonitor
 from .theme import CANVAS, PAGE, SURFACE, app_stylesheet, badge_style, button_style, dialog_stylesheet, meta_style, panel_style, section_title_style
 from .vocabulary import VocabularyLibrary, VocabularyStore
@@ -415,7 +417,7 @@ def remaining_label(timestamp):
 def scan():
     try:s=subprocess.run(["wmctrl","-l","-x","-p"],capture_output=True,text=True,timeout=3).stdout
     except Exception:return []
-    cleanup_bridge_files(); out=[]; ps=profiles(); sessions=latest_vscode_sessions(); by_id={p["id"]:p for p in ps}; global_id=extension_state(GLOBAL_DB).get("codexSwitch.activeProfileId.default")
+    cleanup_bridge_files(); out=[]; ps=profiles(); native_account=native_codex_account() if not ps else ""; sessions=latest_vscode_sessions(); by_id={p["id"]:p for p in ps}; global_id=extension_state(GLOBAL_DB).get("codexSwitch.activeProfileId.default")
     for line in s.splitlines():
         p=line.split(None,4)
         if len(p)<5:continue
@@ -430,8 +432,8 @@ def scan():
         else:status,completed,session_account=session_status(path,ps,sessions) if path else ("状态未知",0,None)
         bridge_info=bridge_window_info(path,name) or initial_bridge; provider=bridge_info.get("provider","subscription")
         provider_profile=api_profile_for(provider)
-        account=provider_profile.get("name",provider) if provider!="subscription" else (session_account or profile.get("name","未知账号"))
-        scope="API 服务商" if provider!="subscription" else ("最近请求" if session_account else ("工作区" if workspace_id else "插件当前"))
+        if provider!="subscription":account,scope=provider_profile.get("name",provider),"API 服务商"
+        else:account,scope=subscription_identity(session_account,profile.get("name"),native_account,bool(workspace_id))
         out.append(dict(id=wid,pid=pid,bridge_pid=bridge_info.get("pid"),bridge_version=bridge_info.get("bridgeVersion",""),session_id=bridge_info.get("sessionId",""),verified=bridge_info.get("verified",False),title=title,folder=name,path=path,account=account,account_scope=scope,status=status,completed=completed,provider=provider))
     return out
 
@@ -501,6 +503,30 @@ class DraggableHeader(QFrame):
         if event.button()==Qt.LeftButton:self.window().toggle_maximize(); event.accept(); return
         super().mouseDoubleClickEvent(event)
 
+class PopupDragHeader(QFrame):
+    """A frameless popup title bar that can be dragged across screens."""
+    def __init__(self,parent=None):
+        super().__init__(parent); self._press=None; self._origin=None; self.setCursor(Qt.SizeAllCursor); self.setToolTip("按住标题栏拖动窗口")
+    def mousePressEvent(self,event):
+        if event.button()==Qt.LeftButton:self._press=global_point(event); self._origin=self.window().pos(); event.accept(); return
+        super().mousePressEvent(event)
+    def mouseMoveEvent(self,event):
+        if self._press is not None and event.buttons() & Qt.LeftButton:
+            self.window().move(self._origin+global_point(event)-self._press); event.accept(); return
+        super().mouseMoveEvent(event)
+    def mouseReleaseEvent(self,event):
+        if event.button()==Qt.LeftButton and self._press is not None:self._press=None; self._origin=None; event.accept(); return
+        super().mouseReleaseEvent(event)
+
+class VisibleSizeGrip(QSizeGrip):
+    """A discoverable resize grip for the otherwise borderless popup."""
+    def __init__(self,parent=None):
+        super().__init__(parent); self.setFixedSize(20,20); self.setToolTip("按住拖动以调整窗口大小")
+    def paintEvent(self,event):
+        super().paintEvent(event); painter=QPainter(self); painter.setRenderHint(QPainter.Antialiasing); painter.setPen(QPen(QColor("#9a91aa"),1.5))
+        for offset in (6,10,14):painter.drawLine(self.width()-offset,self.height()-2,self.width()-2,self.height()-offset)
+        painter.end()
+
 class SpeechCard(QFrame):
     """Rounded chat surface with a pointer aimed at the floating bubble."""
     def __init__(self,parent=None):
@@ -520,23 +546,23 @@ class SpeechCard(QFrame):
         painter.setPen(QPen(QColor("#ddd6ee"),1)); painter.setBrush(QColor("#fffefa")); painter.drawPath(path); painter.end()
 
 class SelectionBubble(QDialog):
-    """Compact global translate/explain result attached to the floating tower."""
+    """Movable and resizable global translate/explain result popup."""
     def __init__(self,parent,mode,text,executor):
         super().__init__(parent); self.mode=mode; self.source=text; self.executor=executor; self.future=None; self.audio_cancel=None; self.dismiss_armed=False
         self.setWindowFlag(Qt.FramelessWindowHint,True); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setWindowFlag(Qt.Tool,True)
-        self.setAttribute(Qt.WA_TranslucentBackground,True); self.setFixedWidth(442); self.setMinimumHeight(190); self.setMaximumHeight(520)
+        self.setAttribute(Qt.WA_TranslucentBackground,True); self.setMinimumSize(400,230); self.resize(460,310)
         outer=QVBoxLayout(self); outer.setContentsMargins(12,12,12,12)
         card=SpeechCard(); self.card=card; card.setObjectName("selectionCard"); card.setStyleSheet("QFrame#selectionCard{background:transparent;border:0} QLabel{background:transparent;border:0}")
         shadow=QGraphicsDropShadowEffect(card); shadow.setBlurRadius(28); shadow.setOffset(0,7); shadow.setColor(QColor(56,45,90,65)); card.setGraphicsEffect(shadow)
         layout=QVBoxLayout(card); layout.setContentsMargins(22,13,14,14); layout.setSpacing(9)
-        head=QHBoxLayout(); avatar=QLabel("AI"); avatar.setAlignment(Qt.AlignCenter); avatar.setFixedSize(28,28); avatar.setStyleSheet("color:white;background:#9a87c8;border-radius:14px;font-size:10px;font-weight:700"); head.addWidget(avatar); titles=QVBoxLayout(); titles.setSpacing(0); title=QLabel("快捷翻译" if mode=="translate" else "快捷解释"); title.setStyleSheet("color:#4c416f;font-size:13px;font-weight:700"); titles.addWidget(title); sub=QLabel("来自当前选中内容"); sub.setStyleSheet("color:#9a91aa;font-size:10px"); titles.addWidget(sub); head.addLayout(titles); head.addStretch(); hint=QLabel("Alt+Q" if mode=="translate" else "Alt+E"); hint.setStyleSheet("color:#81749d;background:#f2eefb;padding:3px 7px;border-radius:7px;font-size:10px"); head.addWidget(hint); close=QPushButton("×"); close.setFixedSize(28,28); close.setToolTip("关闭"); close.setStyleSheet("QPushButton{padding:0;border:0;background:transparent;color:#9a91aa;font-size:17px} QPushButton:hover{background:#f4effb;color:#65567f;border-radius:14px}"); close.clicked.connect(self.close); head.addWidget(close); layout.addLayout(head)
+        drag_header=PopupDragHeader(); head=QHBoxLayout(drag_header); head.setContentsMargins(0,0,0,0); avatar=QLabel("AI"); avatar.setAlignment(Qt.AlignCenter); avatar.setFixedSize(28,28); avatar.setStyleSheet("color:white;background:#9a87c8;border-radius:14px;font-size:10px;font-weight:700"); head.addWidget(avatar); titles=QVBoxLayout(); titles.setSpacing(0); title=QLabel("快捷翻译" if mode=="translate" else "快捷解释"); title.setStyleSheet("color:#4c416f;font-size:13px;font-weight:700"); titles.addWidget(title); sub=QLabel("拖动标题栏移动 · 右下角拉伸"); sub.setStyleSheet("color:#9a91aa;font-size:10px"); titles.addWidget(sub); head.addLayout(titles); head.addStretch(); hint=QLabel("Alt+Q" if mode=="translate" else "Alt+E"); hint.setStyleSheet("color:#81749d;background:#f2eefb;padding:3px 7px;border-radius:7px;font-size:10px"); head.addWidget(hint); close=QPushButton("×"); close.setCursor(Qt.ArrowCursor); close.setFixedSize(28,28); close.setToolTip("关闭"); close.setStyleSheet("QPushButton{padding:0;border:0;background:transparent;color:#9a91aa;font-size:17px} QPushButton:hover{background:#f4effb;color:#65567f;border-radius:14px}"); close.clicked.connect(self.close); head.addWidget(close); layout.addWidget(drag_header)
         source_label=QLabel(text if text else "请先选中一个名词或一段文字"); source_label.setWordWrap(True); source_label.setTextInteractionFlags(Qt.TextSelectableByMouse); source_label.setMaximumHeight(82); source_label.setStyleSheet("color:#716881;background:#f7f3fd;padding:9px 11px;border-radius:11px;font-size:10px"); layout.addWidget(source_label)
-        answer_scroll=QScrollArea(); answer_scroll.setWidgetResizable(True); answer_scroll.setFrameShape(QFrame.NoFrame); answer_scroll.setMinimumHeight(58); answer_scroll.setMaximumHeight(300); answer_scroll.setStyleSheet("QScrollArea{background:white;border:1px solid #eee8f5;border-radius:11px} QScrollArea QWidget#qt_scrollarea_viewport{background:white}")
+        answer_scroll=QScrollArea(); self.answer_scroll=answer_scroll; answer_scroll.setWidgetResizable(True); answer_scroll.setFrameShape(QFrame.NoFrame); answer_scroll.setMinimumHeight(72); answer_scroll.setStyleSheet("QScrollArea{background:white;border:1px solid #eee8f5;border-radius:11px} QScrollArea QWidget#qt_scrollarea_viewport{background:white}")
         self.answer=QLabel("正在翻译…" if mode=="translate" else "正在理解这个概念…"); self.answer.setWordWrap(True); self.answer.setAlignment(Qt.AlignLeft|Qt.AlignTop); self.answer.setTextInteractionFlags(Qt.TextSelectableByMouse); self.answer.setContentsMargins(11,10,11,10); self.answer.setStyleSheet("color:#303648;background:white;border:0;font-size:12px"); answer_scroll.setWidget(self.answer); layout.addWidget(answer_scroll,1)
         actions=QHBoxLayout(); actions.setSpacing(7); tip=QLabel("选中文字可直接复制"); tip.setStyleSheet("color:#aaa2b5;font-size:9px"); actions.addWidget(tip); actions.addStretch(); action_style="QPushButton{padding:6px 11px;background:#f5f1fb;color:#685a82;border:1px solid #e5dcf2;border-radius:12px;font-size:10px;font-weight:600} QPushButton:hover{background:#ebe4f7;border-color:#d4c6e8;color:#504268} QPushButton:pressed{background:#dfd5ef}"
-        self.speak=QPushButton("朗读"); self.speak.setToolTip("重新朗读选中的英文"); self.speak.setStyleSheet(action_style); self.speak.clicked.connect(self.replay); actions.addWidget(self.speak); copy=QPushButton("复制"); copy.setToolTip("复制 AI 结果"); copy.setStyleSheet(action_style); copy.clicked.connect(self.copy_result); actions.addWidget(copy); layout.addLayout(actions); outer.addWidget(card)
+        self.speak=QPushButton("朗读"); self.speak.setToolTip("重新朗读选中的英文"); self.speak.setStyleSheet(action_style); self.speak.clicked.connect(self.replay); actions.addWidget(self.speak); copy=QPushButton("复制"); copy.setToolTip("复制 AI 结果"); copy.setStyleSheet(action_style); copy.clicked.connect(self.copy_result); actions.addWidget(copy); actions.addWidget(VisibleSizeGrip(self),0,Qt.AlignRight|Qt.AlignBottom); layout.addLayout(actions); outer.addWidget(card)
         if text:
-            self.future=executor.submit(request_deepseek,mode,text); QTimer.singleShot(80,self.poll)
+            self.future=executor.submit(request_ai,mode,text); QTimer.singleShot(80,self.poll)
             if mode=="translate":QTimer.singleShot(80,self.replay)
         else:QTimer.singleShot(2600,self.close)
         # Qt5 does not reliably emit focusOutEvent for a frameless Qt.Tool when
@@ -551,7 +577,13 @@ class SelectionBubble(QDialog):
         if not self.future.done():QTimer.singleShot(80,self.poll); return
         try:result=self.future.result()
         except Exception as exc:result="这次没有处理成功："+str(exc)
-        self.answer.setText(result); self.future=None; self.adjustSize()
+        self.answer.setText(result); self.future=None; QTimer.singleShot(0,lambda:self.expand_for_result(result))
+    def expand_for_result(self,result):
+        """Grow long answers using the real wrapped-label height, capped by screen."""
+        if len(result)<220:return
+        screen=QApplication.screenAt(self.frameGeometry().center()) or QApplication.primaryScreen(); available=screen.availableGeometry()
+        target_width=min(max(self.width(),600),int(available.width()*.72)); content_width=max(260,target_width-82); answer_height=max(80,self.answer.heightForWidth(content_width)); chrome=max(170,self.height()-self.answer_scroll.height()); target_height=min(int(available.height()*.82),max(self.height(),chrome+answer_height+18))
+        old_center=self.frameGeometry().center(); self.resize(target_width,target_height); x=max(available.left()+8,min(old_center.x()-self.width()//2,available.right()-self.width()-8)); y=max(available.top()+8,min(old_center.y()-self.height()//2,available.bottom()-self.height()-8)); self.move(x,y)
     def copy_result(self):
         QApplication.clipboard().setText(self.answer.text())
     def replay(self):
@@ -569,13 +601,13 @@ class SelectionBubble(QDialog):
         super().closeEvent(event)
 
 class LessonChatDialog(QDialog):
-    """A lightweight, concept-scoped tutor using the existing DeepSeek key."""
+    """A lightweight, concept-scoped tutor using the configured AI provider."""
     def __init__(self,parent,bundle,concept,lesson,store,executor):
         super().__init__(parent); self.bundle=bundle; self.concept=concept; self.lesson=lesson; self.store=store; self.executor=executor; self.future=None; self._close_after_answer=False
         self.setWindowTitle("AI 学习助手 · "+concept.get("title_zh","当前知识点")); self.setWindowFlag(Qt.WindowStaysOnTopHint,True); self.setMinimumSize(460,480); self.resize(540,680); self.setStyleSheet(dialog_stylesheet("learn"))
         root=QVBoxLayout(self); root.setContentsMargins(14,13,14,14); root.setSpacing(9)
         head=QHBoxLayout(); titles=QVBoxLayout(); titles.setSpacing(1); title=QLabel("AI 学习助手"); title.setFont(QFont("Noto Sans CJK SC",16,QFont.Bold)); title.setStyleSheet("color:#312e81"); titles.addWidget(title); subtitle=QLabel("当前课程 · "+concept.get("title_zh","知识点")); subtitle.setStyleSheet("color:#64748b;font-size:10px"); titles.addWidget(subtitle); head.addLayout(titles); head.addStretch(); clear=QPushButton("清空对话"); clear.clicked.connect(self.clear_chat); head.addWidget(clear); root.addLayout(head)
-        privacy=QLabel("只会把当前知识点、当前微课和你在这里的提问发送给 DeepSeek；项目路径、账号和 Codex 对话不会发送。对话记录仅保存在本机。")
+        privacy=QLabel(f"只会把当前知识点、当前微课和你在这里的提问发送给{active_provider_label()}；项目路径、账号和 Codex 对话不会发送。对话记录仅保存在本机。")
         privacy.setWordWrap(True); privacy.setStyleSheet("color:#475569;background:#eef2ff;padding:7px 9px;border-radius:7px;font-size:9px"); root.addWidget(privacy)
         self.scroll=QScrollArea(); self.scroll.setWidgetResizable(True); self.scroll.setFrameShape(QFrame.NoFrame); self.scroll.setStyleSheet("QScrollArea{background:#f8fafc;border:0} QScrollArea QWidget#qt_scrollarea_viewport{background:#f8fafc}"); self.chat_body=QWidget(); self.chat_body.setStyleSheet("background:#f8fafc"); self.chat_layout=QVBoxLayout(self.chat_body); self.chat_layout.setContentsMargins(2,4,2,4); self.chat_layout.setSpacing(8); self.scroll.setWidget(self.chat_body); root.addWidget(self.scroll,1)
         suggestions=QHBoxLayout(); suggestions.setSpacing(5)
@@ -822,7 +854,7 @@ class App(QWidget):
         # must never expand or otherwise disturb the collapsed control tower.
         self.selection_popup=SelectionBubble(None,mode,text,self.selection_executor)
         screen=QApplication.screenAt(self.frameGeometry().center()) or QApplication.primaryScreen(); available=screen.availableGeometry(); anchor=self.frameGeometry(); popup=self.selection_popup
-        popup.adjustSize(); x=anchor.right()+8
+        x=anchor.right()+8
         pointer_side="left"
         if x+popup.width()>available.right():x=anchor.left()-popup.width()-8; pointer_side="right"
         popup.card.set_pointer_side(pointer_side)
@@ -1048,7 +1080,7 @@ class App(QWidget):
             cell=QVBoxLayout(); cell.setSpacing(0); number=QLabel(value); number.setAlignment(Qt.AlignRight); number.setStyleSheet(f"color:{color};font-size:15px;font-weight:700"); caption=QLabel(label); caption.setAlignment(Qt.AlignRight); caption.setStyleSheet("color:#8793a5;font-size:9px"); cell.addWidget(number); cell.addWidget(caption); layout.addLayout(cell)
         self.box.addWidget(panel)
     def account_panel(self):
-        rows=profiles(); api_profiles=api_provider_profiles(); api_ready=sum(p.get("configured",False) for p in api_profiles); p=QFrame(); p.setObjectName("accountPanel"); p.setStyleSheet("QFrame#accountPanel{background:#f7fbf9;border:1px solid #dbeae3;border-radius:14px} QLabel{background:transparent}"); v=QVBoxLayout(p); v.setContentsMargins(13,10,13,12); v.setSpacing(7); head=QHBoxLayout(); heading=QLabel("账号额度"); heading.setFont(QFont("Noto Sans CJK SC",14,QFont.Bold)); heading.setStyleSheet("color:#273142"); head.addWidget(heading); subtitle=QLabel("自动读取 Codex Switch"); subtitle.setStyleSheet("color:#7f8999;font-size:10px"); head.addWidget(subtitle); head.addStretch(); count=QLabel(f"{len(rows)} 个 Plus · {api_ready} 个 API 备用"); count.setStyleSheet(badge_style("system")); head.addWidget(count); v.addLayout(head)
+        switch_rows=profiles(); native_profile=native_codex_quota_profile() if not switch_rows else {}; rows=switch_rows or ([native_profile] if native_profile else []); api_profiles=api_provider_profiles(); api_ready=sum(p.get("configured",False) for p in api_profiles); p=QFrame(); p.setObjectName("accountPanel"); p.setStyleSheet("QFrame#accountPanel{background:#f7fbf9;border:1px solid #dbeae3;border-radius:14px} QLabel{background:transparent}"); v=QVBoxLayout(p); v.setContentsMargins(13,10,13,12); v.setSpacing(7); head=QHBoxLayout(); heading=QLabel("账号额度"); heading.setFont(QFont("Noto Sans CJK SC",14,QFont.Bold)); heading.setStyleSheet("color:#273142"); head.addWidget(heading); subtitle=QLabel("自动读取 Codex Switch" if switch_rows else "读取本机 Codex 会话"); subtitle.setStyleSheet("color:#7f8999;font-size:10px"); head.addWidget(subtitle); head.addStretch(); count=QLabel(f"{len(rows)} 个 Plus · {api_ready} 个 API 备用"); count.setStyleSheet(badge_style("system")); head.addWidget(count); v.addLayout(head)
         if api_profiles:
             usage_row=QHBoxLayout(); usage_row.setSpacing(8)
             for api in api_profiles:
@@ -1142,7 +1174,8 @@ class App(QWidget):
             action.triggered.connect(lambda _,lexicon_id=item["id"]:self.select_vocabulary(lexicon_id))
         selector.setMenu(lexicon_menu); row.addWidget(selector)
         count_badge=QLabel(f"{selected_lexicon['count']} 词" if selected_lexicon else "0 词"); count_badge.setStyleSheet("color:#64748b;background:#f1f5f9;padding:4px 7px;border-radius:5px;font-size:9px"); row.addWidget(count_badge); row.addStretch()
-        random_button=QPushButton("随机" if self.vocab_random else "顺序"); random_button.setToolTip("切换出词顺序"); random_button.clicked.connect(self.toggle_vocab_random); row.addWidget(random_button); imported=QPushButton("导入"); imported.setToolTip("导入 UTF-8 TXT 词库"); imported.clicked.connect(self.import_vocabulary); row.addWidget(imported); v.addWidget(controls)
+        random_button=QPushButton("随机" if self.vocab_random else "顺序"); random_button.setToolTip("切换出词顺序"); random_button.clicked.connect(self.toggle_vocab_random); row.addWidget(random_button); imported=QPushButton("导入"); imported.setToolTip("导入 UTF-8 TXT 词库"); imported.clicked.connect(self.import_vocabulary); row.addWidget(imported)
+        removable=bool(selected_lexicon and not selected_lexicon["builtin"]); remove_vocab=QPushButton("删除"); remove_vocab.setEnabled(removable); remove_vocab.setToolTip("删除当前导入词库的本地副本" if removable else "内置词库不能删除"); remove_vocab.setStyleSheet("QPushButton{color:#b91c1c;background:#fff1f2;border:1px solid #fecdd3} QPushButton:hover{background:#ffe4e6;border-color:#fda4af}" if removable else ""); remove_vocab.clicked.connect(lambda _,lexicon_id=selected_lexicon["id"] if selected_lexicon else "":self.delete_vocabulary(lexicon_id)); row.addWidget(remove_vocab); v.addWidget(controls)
 
         progress=QFrame(); progress.setObjectName("vocabProgress"); progress.setStyleSheet("QFrame#vocabProgress{background:#fff7ed;border:1px solid #fed7aa;border-radius:9px} QLabel{background:transparent}"); progress_layout=QVBoxLayout(progress); progress_layout.setContentsMargins(11,7,11,8); progress_layout.setSpacing(4); progress_top=QHBoxLayout(); today=stats["daily"]; progress_title=QLabel(f"今日 {today['reviewed']} 个"); progress_title.setStyleSheet("color:#9a3412;font-weight:700"); progress_top.addWidget(progress_title); progress_top.addStretch(); progress_meta=QLabel(f"待复习 {stats['due']} · 已学 {stats['learned']}/{stats['total']} · 收藏 {stats['favorites']}"); progress_meta.setStyleSheet("color:#c2410c;font-size:9px"); progress_top.addWidget(progress_meta); progress_layout.addLayout(progress_top); daily_bar=QProgressBar(); daily_bar.setRange(0,20); daily_bar.setValue(min(20,today["reviewed"])); daily_bar.setTextVisible(False); daily_bar.setStyleSheet("QProgressBar{height:6px;background:#ffedd5;border:0;border-radius:3px} QProgressBar::chunk{background:#fb923c;border-radius:3px}"); progress_layout.addWidget(daily_bar); v.addWidget(progress)
 
@@ -1236,6 +1269,15 @@ class App(QWidget):
         try:lexicon_id=self.vocab_library.import_file(source)
         except Exception as exc:QMessageBox.warning(self,"导入失败",str(exc)); return
         self.vocab_lexicon_id=""; self.select_vocabulary(lexicon_id)
+    def delete_vocabulary(self,lexicon_id):
+        item=self.vocab_library.get(lexicon_id)
+        if not item or item.get("builtin"):return
+        message=f"确定删除导入词库“{self.vocab_lexicon_name(item)}”吗？\n\n只会删除 FlowDeck 保存的本地副本；下载目录中的原文件和已有学习进度不会删除。"
+        if QMessageBox.question(self,"删除导入词库",message,QMessageBox.Yes|QMessageBox.No,QMessageBox.No)!=QMessageBox.Yes:return
+        self.cancel_vocab_audio(True)
+        try:self.vocab_library.delete_imported(lexicon_id)
+        except Exception as exc:QMessageBox.warning(self,"删除失败",str(exc)); return
+        lexicons=self.vocab_library.lexicons(); self.vocab_lexicon_id=self.vocab_store.selected(lexicons); selected=self.vocab_library.get(self.vocab_lexicon_id); self.vocab_words=self.vocab_library.load(selected["path"]) if selected else []; queue=self.vocab_store.due_words(self.vocab_words); self.vocab_current_id=queue[0]["id"] if queue else None; self.vocab_revealed=False; self.vocab_history=[]; self.vocab_retry_queue=[]; self.vocab_last_spoken_id=None; self.refresh(scan_windows=False)
     def curriculum_panel(self,v,panel):
         self.curriculum_card_widget=None
         bundle=self.curriculum_library.get(self.curriculum_domain_id)

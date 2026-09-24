@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from .ai_client import chat_completion
 from .paths import CONFIG_DIR, DATA_DIR, ENV_FILE
 
 DB=DATA_DIR/"learning.db"
@@ -371,8 +372,6 @@ class Store:
         size=sum(path.stat().st_size for path in self.path.parent.glob(self.path.name+"*") if path.is_file()); return {"count":count,"saved":saved or 0,"bytes":size,"limit":1000}
 
 def _digest(items,context,preferences):
-    key=_env("DEEPSEEK_API_KEY")
-    if not key:raise RuntimeError("未配置 DeepSeek API Key")
     compact=[]
     for index,item in enumerate(items):compact.append({"index":index,"channel":item.get("primary_channel"),"source":item.get("sources") or [item.get("source")],"title":item.get("title"),"description":item.get("abstract","")[:2200],"published":item.get("published"),"signals":item.get("signals"),"topics":item.get("topic_labels"),"reference_matches":item.get("references"),"user_knowledge":item.get("knowledge"),"resources":item.get("resources",[])})
     anchors=[entry.get("name") for entry in preferences.get("reference_works",[])[:10]]
@@ -381,8 +380,7 @@ def _digest(items,context,preferences):
 输出严格 JSON 数组，每项包含 index、summary、delta、why、seconds、tags、difficulty。summary 不超过 48 字，delta 不超过 60 字，why 不超过 48 字。seconds 取 20/30/45/60，tags 最多 3 个，difficulty 取入门/中等/进阶。必须忠于输入证据，不得编造热度、实验或开源情况。
 候选：
 """+json.dumps(compact,ensure_ascii=False)
-    payload={"model":"deepseek-v4-flash","messages":[{"role":"system","content":"只输出合法 JSON，用简体中文，忠于证据。"},{"role":"user","content":prompt}],"thinking":{"type":"disabled"},"temperature":.15,"max_tokens":4000,"stream":False}
-    response=json.loads(urlopen(Request("https://api.deepseek.com/chat/completions",data=json.dumps(payload).encode(),headers={"Content-Type":"application/json","Authorization":"Bearer "+key}),timeout=55).read()); text=response["choices"][0]["message"]["content"].strip()
+    text=chat_completion([{"role":"system","content":"只输出合法 JSON，用简体中文，忠于证据。"},{"role":"user","content":prompt}],temperature=.15,max_tokens=4000,timeout=55)
     if text.startswith("```"):text=text.split("\n",1)[1].rsplit("```",1)[0]
     return {int(item["index"]):item for item in json.loads(text)}
 

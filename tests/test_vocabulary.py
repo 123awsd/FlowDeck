@@ -45,6 +45,18 @@ class VocabularyTests(unittest.TestCase):
         self.assertGreater(counts.get("高考3500词汇表", 0), 3000)
         self.assertGreaterEqual(len(list((ASSETS_DIR / "vocab-cats").glob("*.png"))), 30)
 
+    def test_imported_lexicon_can_be_deleted_but_builtin_cannot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); builtin_dir, user_dir = root / "builtin", root / "user"
+            builtin_dir.mkdir(); user_dir.mkdir()
+            (builtin_dir / "内置.txt").write_text("builtin\t内置\n", encoding="utf-8")
+            source = root / "CET6.txt"; source.write_text("abandon\tv.\t放弃\n", encoding="utf-8")
+            library = VocabularyLibrary(builtin_dir, user_dir); lexicon_id = library.import_file(source)
+            imported = library.get(lexicon_id); self.assertTrue(imported["path"].exists())
+            self.assertEqual(library.delete_imported(lexicon_id), "CET6")
+            self.assertFalse(imported["path"].exists())
+            with self.assertRaisesRegex(ValueError, "内置词库不能删除"): library.delete_imported("内置")
+
 
 if __name__ == "__main__":
     unittest.main()
